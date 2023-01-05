@@ -5,6 +5,16 @@ import time
 import os
 from copy import deepcopy
 
+def padding(list1, list2, list3, pad_token,model):
+    max_len = max([len(i) for i in list1])  # utter-len
+    result1 = torch.ones((len(list1), max_len)).long().to(model.device) * pad_token
+    result2 = torch.ones((len(list2), max_len)).long().to(model.device) * pad_token
+    result3 = torch.ones((len(list3), max_len)).long().to(model.device) * pad_token
+    for i in range(len(list1)):
+        result1[i, :len(list1[i])] = list1[i]
+        result2[i, :len(list2[i])] = list2[i]
+        result3[i, :len(list3[i])] = list3[i]
+    return result1, result2, result3
 
 def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, is_gt_p_state=False):
     model.eval()
@@ -21,22 +31,39 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
     last_dialogue_state = {}
     wall_times = [] 
     for di, i in enumerate(test_data):
+
+
         if i.turn_id == 0 or is_gt_p_state:
             last_dialogue_state = deepcopy(i.gold_last_state)
-            
+
         i.last_dialogue_state = deepcopy(last_dialogue_state)
         i.make_instance(tokenizer)
 
         input_ids = torch.LongTensor([i.input_id]).to(model.device)
         input_mask = torch.LongTensor([i.input_mask]).to(model.device)
         segment_ids = torch.LongTensor([i.segment_id]).to(model.device)
-        label_ids = torch.LongTensor([i.label_ids]).to(model.device)
-        
+        input_ids_state = torch.LongTensor([i.input_id_state]).to(model.device)
+        input_mask_state = torch.LongTensor([i.input_mask_state]).to(model.device)
+        segment_ids_state = torch.LongTensor([i.segment_id_state]).to(model.device)
+        label_ids = torch.LongTensor([i.label_ids]).to(model.device).to(model.device)
+
+        input_ids, segment_ids, input_mask = padding(input_ids, segment_ids, input_mask, torch.LongTensor([0]).to(model.device),model)
+        input_ids_state, segment_ids_state, input_mask_state = padding(input_ids_state, segment_ids_state,
+                                                                       input_mask_state, torch.LongTensor([0]).to(model.device),model)
+        #print(input_ids_state)
+        # input_ids.to(model.device)
+        # input_mask.to(model.device)
+        # segment_ids.to(model.device)
+        # input_ids_state.to(model.device)
+        # input_mask_state.to(model.device)
+        # segment_ids_state.to(model.device)
+
         start = time.perf_counter()
         with torch.no_grad():
             t_loss, _, t_acc, t_acc_slot, t_pred_slot = model(input_ids=input_ids, attention_mask=input_mask,
-                                                              token_type_ids=segment_ids, labels=label_ids,
-                                                              eval_type="test")
+                                                              token_type_ids=segment_ids, input_ids_state = input_ids_state,
+                                                              input_mask_state = input_mask_state, segment_ids_state = segment_ids_state,
+                                                              labels=label_ids, eval_type="test")
             loss += t_loss.item()
             joint_acc += t_acc
             slot_acc += t_acc_slot
@@ -44,10 +71,10 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
                 final_count += 1
                 final_joint_acc += t_acc
                 final_slot_acc += t_acc_slot
-            
+
         end = time.perf_counter()
         wall_times.append(end - start)
-        
+
         ss = {}
         t_turn_label = []
         for s, slot in enumerate(slot_meta):
@@ -62,13 +89,13 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
             ss[slot] = {}
             ss[slot]["pred"] = v
             ss[slot]["gt"] = vv
-        
+
         if set(t_turn_label) == set(i.turn_label):
             joint_turn_acc += 1
 
         key = str(i.dialogue_id) + '_' + str(i.turn_id)
         results[key] = ss
-        
+
     loss = loss / len(test_data)
     joint_acc_score = joint_acc / len(test_data)
     joint_turn_acc_score = joint_turn_acc / len(test_data)

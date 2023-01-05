@@ -229,6 +229,17 @@ class UtteranceAttention(nn.Module):
 
         return attended_embedding
 
+class FusionGate(nn.Module):
+    def __init__(self,model_output_dim):
+        # 初始化函数
+        super(FusionGate, self).__init__()
+        self.activate_function = nn.Sigmoid()
+        self.W_mlp = nn.Linear(model_output_dim * 2, model_output_dim)
+
+    def forward(self, sequence_output, state_output):
+        sigma =self.activate_function(self.W_mlp(torch.cat((sequence_output, state_output), -1)))
+        fusion_result = (1 - sigma) * sequence_output + sigma * state_output
+        return fusion_result
 
 class Decoder(nn.Module):
     def __init__(self, args, model_output_dim, num_labels, slot_value_pos, device):
@@ -254,6 +265,7 @@ class Decoder(nn.Module):
                                      nn.ReLU(),
                                      nn.Dropout(p=self.dropout_prob),
                                      nn.Linear(self.model_output_dim, self.model_output_dim))
+        self.gate = FusionGate(self.model_output_dim)
 
         ### basic modues, attention dropout is 0.1 by default
         attn = MultiHeadAttention(self.attn_head, self.model_output_dim)
@@ -312,7 +324,7 @@ class Decoder(nn.Module):
 
         return loss, loss_slot, pred_slot
 
-    def forward(self, sequence_output, attention_mask, labels, slot_lookup, value_lookup, eval_type="train"):
+    def forward(self, sequence_output, state_output, attention_mask, input_mask_state, labels, slot_lookup, value_lookup, eval_type="train"):
 
         batch_size = sequence_output.size(0)
         target_slots = list(range(0, self.num_slots))
@@ -320,15 +332,22 @@ class Decoder(nn.Module):
         # slot utterance attention
         slot_embedding = slot_lookup.weight[target_slots, :]  # select target slots' embeddings
         slot_utter_emb = self.slot_utter_attn(slot_embedding, sequence_output, attention_mask)
+        #print(slot_utter_emb.size())
 
+        slot_state_emb = self.slot_utter_attn(slot_embedding, state_output, input_mask_state)
+        #print(slot_state_emb.size())
         # concatenate with slot_embedding
         slot_utter_embedding = torch.cat((slot_embedding.unsqueeze(0).repeat(batch_size, 1, 1), slot_utter_emb), 2)
+        slot_state_embedding = torch.cat((slot_embedding.unsqueeze(0).repeat(batch_size, 1, 1), slot_state_emb), 2)
 
         # MLP
         slot_utter_embedding2 = self.SlotMLP(slot_utter_embedding)
+        slot_state_embedding2 = self.SlotMLP(slot_state_embedding)
+
+        hidden_state = self.gate(slot_utter_embedding2, slot_state_embedding2)
 
         # slot self attention
-        hidden_slot = self.slot_self_attn(slot_utter_embedding2)
+        hidden_slot = self.slot_self_attn(hidden_state)
 
         # prediction
         hidden = self.pred(hidden_slot)
@@ -355,15 +374,19 @@ class BeliefTracker(nn.Module):
         self.model_output_dim = self.encoder.config.hidden_size
         self.decoder = Decoder(args, self.model_output_dim, self.num_labels, self.slot_value_pos, device)
 
-    def forward(self, input_ids, attention_mask, token_type_ids, labels, eval_type="train"):
+    def forward(self, input_ids, attention_mask, token_type_ids, input_ids_state, input_mask_state, segment_ids_state, labels, eval_type="train"):
         batch_size = input_ids.size(0)
         num_slots = self.num_slots
 
         # encoder, a pretrained model, output is a tuple
         sequence_output = self.encoder(input_ids, attention_mask, token_type_ids)[0]
+        #print("^^^^")
+        #print(self.encoder(input_ids_state, input_mask_state, segment_ids_state))
+        state_output = self.encoder(input_ids_state, input_mask_state, segment_ids_state)[0]
+        state_output = state_output.detach()
 
         # decoder
-        loss, loss_slot, pred_slot = self.decoder(sequence_output, attention_mask,
+        loss, loss_slot, pred_slot = self.decoder(sequence_output, state_output, attention_mask, input_mask_state,
                                                   labels, self.slot_lookup,
                                                   self.value_lookup, eval_type)
 
@@ -374,16 +397,3 @@ class BeliefTracker(nn.Module):
             torch.floor_divide(torch.sum(accuracy, 1), num_slots)).float().item() / batch_size  # joint accuracy
 
         return loss, loss_slot, acc, acc_slot, pred_slot
-
-
-class DST_Model(nn.Module):
-    def __init__(self):
-        super(DST_Model, self).__init__()
-        self.encoder_mt = UtteranceEncoding.from_pretrained(self.args.pretrained_model)
-        self.encoder_last_ds = UtteranceEncoding.from_pretrained(self.args.pretrained_model)
-
-
-
-    def forward(self,x):
-        sequence_output = self.encoder(input_ids, attention_mask, token_type_ids)[0]
-

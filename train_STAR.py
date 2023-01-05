@@ -67,7 +67,7 @@ def main(args):
     #logger.info(slot_meta)
     tokenizer = BertTokenizer.from_pretrained(args.pretrained_model)
 
-    train_data_raw = processor.get_train_instances(args.data_dir, tokenizer)
+    train_data_raw = processor.get_train_instances(args.data_dir, tokenizer)[0:10]
     print("# train examples %d" % len(train_data_raw))
 
     dev_data_raw = processor.get_dev_instances(args.data_dir, tokenizer)
@@ -103,32 +103,9 @@ def main(args):
     for p in sv_encoder.bert.parameters():
         p.requires_grad = False
 
-    history_encoder = UtteranceEncoding.from_pretrained(args.pretrained_model)
-
-    # start = time.time()
-    # new_label_list, slot_value_pos = combine_slot_values(slot_meta, label_list)  # without slot head
-    # #logger.info(slot_value_pos)
-    # end1 = time.time()
-    # print(end1 - start, 's')
-    #
-    # slot_lookup = get_label_lookup_from_first_token(slot_meta, tokenizer, sv_encoder, device) # 固定参数的bert
-    # end2 = time.time()
-    # print(end2 - end1, 's')
-    # value_lookup = get_label_lookup_from_first_token(new_label_list, tokenizer, sv_encoder, device)
-    # end3 = time.time()
-    # print(end3 - end2, 's')
-    # #print(slot_meta)
-    # history_lookup = []
-    history = []
-    for data in train_data_raw:
-        history.append(data.dialogue_history)
-        #history_lookup.append(get_label_lookup_from_first_token(data.dialogue_history, tokenizer, history_encoder, device))
-
-    print(history.size)
-    end4 = time.time()
-    print(end4 - end3, 's')
-    print(history_lookup)
-    print(history_lookup.size)
+    new_label_list, slot_value_pos = combine_slot_values(slot_meta, label_list)  # without slot head
+    slot_lookup = get_label_lookup_from_first_token(slot_meta, tokenizer, sv_encoder, device) # 固定参数的bert
+    value_lookup = get_label_lookup_from_first_token(new_label_list, tokenizer, sv_encoder, device)
 
     model = BeliefTracker(args, slot_lookup, value_lookup, num_labels, slot_value_pos, device)
     model.to(device)
@@ -161,6 +138,7 @@ def main(args):
     best_loss = None
     best_acc = None
     last_update = None
+
     for epoch in trange(int(args.n_epochs), desc="Epoch"):
         batch_loss = []
         batch_acc = []
@@ -169,14 +147,13 @@ def main(args):
             model.train()
 
             batch = [b.to(device) if b is not None else b for b in batch]
-            input_ids, segment_ids, input_mask, label_ids = batch
-
-            #print(tokenizer.convert_ids_to_tokens(input_ids[0,:]))
-            #print(label_ids)
+            # input_ids, segment_ids, input_mask, label_ids = batch
+            input_ids, segment_ids, input_mask, input_ids_state, segment_ids_state, input_mask_state, label_ids = batch
 
             # forward
-            loss, _, acc, _, _ = model(input_ids=input_ids, attention_mask=input_mask,
-                                       token_type_ids=segment_ids, labels=label_ids)
+            loss, _, acc, _, _ = model(input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids,
+                                       input_ids_state = input_ids_state, input_mask_state = input_mask_state,
+                                       segment_ids_state = segment_ids_state, labels=label_ids)
 
             loss.backward()
             enc_optimizer.step()
@@ -252,6 +229,7 @@ def main(args):
 
         if last_update + args.patience <= epoch:
             break
+    
 
     print("Test using best loss model...")
     best_epoch = 0
