@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from copy import deepcopy
 from torch.nn import CrossEntropyLoss
 from transformers import BertPreTrainedModel, BertModel
+from sympy import *
 
 
 class UtteranceEncoding(BertPreTrainedModel):
@@ -78,6 +79,129 @@ class MultiHeadAttention(nn.Module):
     def get_scores(self):
         return self.scores
 
+
+class PowerLawAttention(nn.Module):
+    def __init__(self, heads, d_model, device, dropout=0.1, num_turns=30):
+        super().__init__()
+
+        self.d_model = d_model
+        self.d_k = d_model // heads
+        self.h = heads
+
+        self.q_linear = nn.Linear(d_model, d_model)
+        self.v_linear = nn.Linear(d_model, d_model)
+        self.k_linear = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.out = nn.Linear(d_model, d_model)
+
+        self.scores = None
+        self.device = device
+
+        self.b_encoder = nn.Embedding(num_turns**2, heads, padding_idx=0)
+        self.grama_list = self.grama(num_turns)
+
+    def grama(self, num_turns):
+        grama_list = []
+        for idx in range(num_turns):
+            if idx == 0:
+                grama_history = 1
+            else:
+                t = symbols('t')
+                grama_history = integrate(1 / (t + 1), (t, idx - 1, idx))
+            grama_list.append(grama_history)
+        grama_list.sort()
+        return grama_list
+
+    def list_soft_max(self, input_list):
+        result = []
+        denominator = 0
+        for data in input_list:
+            denominator += math.exp(data)
+        for data in input_list:
+            result.append(math.exp(data) / denominator)
+        return result
+
+    def power_law_distribution(self, input_token_turn_list, history_type_turn_id_list, slot_type):
+        batch_size = input_token_turn_list.size(0)
+        max_len = input_token_turn_list.size(1)
+        slot_num = len(slot_type)
+
+        batch_grama_list = np.zeros((batch_size, slot_num, max_len))
+
+        for i in range(batch_size):
+            this_turn_idx = np.max(input_token_turn_list[i])
+            grama_history_result = self.list_soft_max(self.grama_list[-(this_turn_idx+1):])
+            #print("^^^^")
+            #print(input_token_turn_list[i])
+            for j in range(slot_num):
+                batch_grama_list[i, j, :] = [grama_history_result[idx] if idx != -1 else 0 for idx in input_token_turn_list[i]]
+
+        for i, dict in enumerate(history_type_turn_id_list): #batch
+            for j, type in enumerate(slot_type): #slot
+                #print("^^^^")
+                #print(dict)
+                for key, turn_id_list in enumerate(dict):
+                    if type == key:
+                        grama_type_history = self.list_soft_max(self.grama_list[-len(turn_id_list):])
+
+                        for d, id in turn_id_list:
+                            for k, turn_idx in enumerate(input_token_turn_list):
+                                if turn_idx == id:
+                                    batch_grama_list[i][j][k] += grama_type_history[d]
+
+        batch_grama_tensor = torch.LongTensor(batch_grama_list).to(self.device)
+        #print("^^^^")
+        #print(batch_grama_tensor.size())
+        #batch_grama_tensor = batch_grama_tensor.unsqueeze(1).repeat(1, 4, 1, 1)
+        print("-----b------")
+        #print(b.size())
+        print(batch_grama_tensor.size())
+        return batch_grama_tensor
+
+    def attention(self, q, k, v, b, d_k, mask=None, dropout=None):
+        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
+        #print("-----score------")
+        #print(scores.size())
+        b = b.permute(0, 3, 1, 2).contiguous()
+        scores += b
+
+        if mask is not None:
+            mask = mask.unsqueeze(1)
+            scores = scores.masked_fill(mask == 0, -1e9)
+        scores = F.softmax(scores, dim=-1)
+
+        if dropout is not None:
+            scores = dropout(scores)
+
+        self.scores = scores
+        output = torch.matmul(scores, v)
+        return output
+
+    def forward(self, q, k, v, input_token_turn_list, history_type_turn_id_list, slot_type, mask=None):
+        bs = q.size(0)
+
+        # perform linear operation and split into h heads
+        k = self.k_linear(k).view(bs, -1, self.h, self.d_k)
+        q = self.q_linear(q).view(bs, -1, self.h, self.d_k)
+        v = self.v_linear(v).view(bs, -1, self.h, self.d_k)
+
+        # transpose to get dimensions bs * h * sl * d_model
+        k = k.transpose(1, 2)
+        q = q.transpose(1, 2)
+        v = v.transpose(1, 2)
+
+        b = self.b_encoder(self.power_law_distribution(input_token_turn_list, history_type_turn_id_list, slot_type))
+        print("-----b encode------")
+        print(b.size())
+        scores = self.attention(q, k, v, b, self.d_k, mask, self.dropout)
+
+        # concatenate heads and put through final linear layer
+        concat = scores.transpose(1, 2).contiguous().view(bs, -1, self.d_model)
+        output = self.out(concat)
+        return output
+
+    def get_scores(self):
+        return self.scores
 
 class MultiHeadAttentionTanh(nn.Module):
     def __init__(self, heads, d_model, dropout=0.1):
@@ -201,17 +325,21 @@ class PositionwiseFeedForward(nn.Module):
 
 
 class UtteranceAttention(nn.Module):
-    def __init__(self, attn_head, model_output_dim, dropout=0., attn_type="softmax"):
+    def __init__(self, attn_head, model_output_dim, device, dropout=0., attn_type="softmax"):
         super(UtteranceAttention, self).__init__()
         self.attn_head = attn_head
         self.model_output_dim = model_output_dim
         self.dropout = dropout
-        if attn_type == "tanh":
+        self.attn_type = attn_type
+        self.device = device
+        if self.attn_type == "tanh":
             self.attn_fun = MultiHeadAttentionTanh(self.attn_head, self.model_output_dim, dropout=0.)
+        elif self.attn_type == "power-law":
+            self.attn_fun = PowerLawAttention(self.attn_head, self.model_output_dim, self.device, dropout=0.)
         else:
             self.attn_fun = MultiHeadAttention(self.attn_head, self.model_output_dim, dropout=0.)
 
-    def forward(self, query, value, attention_mask=None):
+    def forward(self, query, value, attention_mask=None, input_token_turn_list=None, history_type_turn_id_list=None, slot_type=None):
         num_query = query.size(0)
         batch_size = value.size(0)
         seq_length = value.size(1)
@@ -224,10 +352,14 @@ class UtteranceAttention(nn.Module):
         else:
             new_value = value
             attn_mask = None
-
-        attended_embedding = self.attn_fun(expanded_query, new_value, new_value, mask=attn_mask)
+        if self.attn_type == "power-law":
+            attended_embedding = self.attn_fun(expanded_query, new_value, new_value,
+                                               input_token_turn_list, history_type_turn_id_list, slot_type, mask=attn_mask)
+        else:
+            attended_embedding = self.attn_fun(expanded_query, new_value, new_value, mask=attn_mask)
 
         return attended_embedding
+
 
 class FusionGate(nn.Module):
     def __init__(self,model_output_dim):
@@ -257,9 +389,10 @@ class Decoder(nn.Module):
         self.attn_type = self.args.attn_type
 
         ### slot utterance attention
-        self.slot_utter_attn = UtteranceAttention(self.attn_head, self.model_output_dim, dropout=0.,
+        self.slot_state_attn = UtteranceAttention(self.attn_head, self.model_output_dim, self.device, dropout=0.,
                                                   attn_type=self.attn_type)
-
+        self.slot_history_attn = UtteranceAttention(self.attn_head, self.model_output_dim, self.device, dropout=0.,
+                                                  attn_type="power-law")
         ### MLP
         self.SlotMLP = nn.Sequential(nn.Linear(self.model_output_dim * 2, self.model_output_dim),
                                      nn.ReLU(),
@@ -324,17 +457,19 @@ class Decoder(nn.Module):
 
         return loss, loss_slot, pred_slot
 
-    def forward(self, sequence_output, state_output, attention_mask, input_mask_state, labels, slot_lookup, value_lookup, eval_type="train"):
+    def forward(self, sequence_output, state_output, attention_mask, input_mask_state, labels, slot_lookup, value_lookup,
+                input_token_turn_list, history_type_turn_id_list, slot_type, eval_type="train"):
 
         batch_size = sequence_output.size(0)
         target_slots = list(range(0, self.num_slots))
 
         # slot utterance attention
         slot_embedding = slot_lookup.weight[target_slots, :]  # select target slots' embeddings
-        slot_utter_emb = self.slot_utter_attn(slot_embedding, sequence_output, attention_mask)
+        slot_utter_emb = self.slot_history_attn(slot_embedding, sequence_output, attention_mask,
+                                                input_token_turn_list, history_type_turn_id_list, slot_type)
         #print(slot_utter_emb.size())
 
-        slot_state_emb = self.slot_utter_attn(slot_embedding, state_output, input_mask_state)
+        slot_state_emb = self.slot_state_attn(slot_embedding, state_output, input_mask_state)
         #print(slot_state_emb.size())
         # concatenate with slot_embedding
         slot_utter_embedding = torch.cat((slot_embedding.unsqueeze(0).repeat(batch_size, 1, 1), slot_utter_emb), 2)
@@ -374,21 +509,21 @@ class BeliefTracker(nn.Module):
         self.model_output_dim = self.encoder.config.hidden_size
         self.decoder = Decoder(args, self.model_output_dim, self.num_labels, self.slot_value_pos, device)
 
-    def forward(self, input_ids, attention_mask, token_type_ids, input_ids_state, input_mask_state, segment_ids_state, labels, eval_type="train"):
+    def forward(self, input_ids, attention_mask, token_type_ids, input_ids_state, input_mask_state, segment_ids_state, labels,
+                input_token_turn_list, history_type_turn_id_list, slot_type, eval_type="train"):
         batch_size = input_ids.size(0)
         num_slots = self.num_slots
 
         # encoder, a pretrained model, output is a tuple
         sequence_output = self.encoder(input_ids, attention_mask, token_type_ids)[0]
-        #print("^^^^")
-        #print(self.encoder(input_ids_state, input_mask_state, segment_ids_state))
+
         state_output = self.encoder(input_ids_state, input_mask_state, segment_ids_state)[0]
         state_output = state_output.detach()
 
         # decoder
         loss, loss_slot, pred_slot = self.decoder(sequence_output, state_output, attention_mask, input_mask_state,
-                                                  labels, self.slot_lookup,
-                                                  self.value_lookup, eval_type)
+                                                  labels, self.slot_lookup, self.value_lookup,
+                                                  input_token_turn_list, history_type_turn_id_list, slot_type, eval_type)
 
         # calculate accuracy
         accuracy = pred_slot == labels

@@ -5,34 +5,25 @@ import time
 import os
 from copy import deepcopy
 
-def padding(list1, list2, list3, pad_token,model):
-    max_len = max([len(i) for i in list1])  # utter-len
-    result1 = torch.ones((len(list1), max_len)).long().to(model.device) * pad_token
-    result2 = torch.ones((len(list2), max_len)).long().to(model.device) * pad_token
-    result3 = torch.ones((len(list3), max_len)).long().to(model.device) * pad_token
-    for i in range(len(list1)):
-        result1[i, :len(list1[i])] = list1[i]
-        result2[i, :len(list2[i])] = list2[i]
-        result3[i, :len(list3[i])] = list3[i]
-    return result1, result2, result3
 
 def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, is_gt_p_state=False):
     model.eval()
-    
+
     final_count = 0
     loss = 0.
     joint_acc = 0.
     joint_turn_acc = 0.
-    final_joint_acc = 0. # only consider the last turn in each dialogue
+    final_joint_acc = 0.  # only consider the last turn in each dialogue
     slot_acc = np.array([0.] * len(slot_meta))
     final_slot_acc = np.array([0.] * len(slot_meta))
 
+    description = json.load(open("utils/slot_description.json", 'r'))
+    slot_type = [description[slot]["value_type"] for slot in slot_meta]
+
     results = {}
     last_dialogue_state = {}
-    wall_times = [] 
+    wall_times = []
     for di, i in enumerate(test_data):
-
-
         if i.turn_id == 0 or is_gt_p_state:
             last_dialogue_state = deepcopy(i.gold_last_state)
 
@@ -42,28 +33,28 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
         input_ids = torch.LongTensor([i.input_id]).to(model.device)
         input_mask = torch.LongTensor([i.input_mask]).to(model.device)
         segment_ids = torch.LongTensor([i.segment_id]).to(model.device)
+        label_ids = torch.LongTensor([i.label_ids]).to(model.device)
+
         input_ids_state = torch.LongTensor([i.input_id_state]).to(model.device)
         input_mask_state = torch.LongTensor([i.input_mask_state]).to(model.device)
         segment_ids_state = torch.LongTensor([i.segment_id_state]).to(model.device)
-        label_ids = torch.LongTensor([i.label_ids]).to(model.device).to(model.device)
 
-        input_ids, segment_ids, input_mask = padding(input_ids, segment_ids, input_mask, torch.LongTensor([0]).to(model.device),model)
-        input_ids_state, segment_ids_state, input_mask_state = padding(input_ids_state, segment_ids_state,
-                                                                       input_mask_state, torch.LongTensor([0]).to(model.device),model)
-        #print(input_ids_state)
-        # input_ids.to(model.device)
-        # input_mask.to(model.device)
-        # segment_ids.to(model.device)
-        # input_ids_state.to(model.device)
-        # input_mask_state.to(model.device)
-        # segment_ids_state.to(model.device)
+        input_token_turn_list = i.input_token_turn_list
+        history_type_turn_id_list = i.history_type_turn_id
 
         start = time.perf_counter()
         with torch.no_grad():
-            t_loss, _, t_acc, t_acc_slot, t_pred_slot = model(input_ids=input_ids, attention_mask=input_mask,
-                                                              token_type_ids=segment_ids, input_ids_state = input_ids_state,
-                                                              input_mask_state = input_mask_state, segment_ids_state = segment_ids_state,
-                                                              labels=label_ids, eval_type="test")
+            t_loss, _, t_acc, t_acc_slot, t_pred_slot = model(input_ids=input_ids,
+                                                              attention_mask=input_mask,
+                                                              token_type_ids=segment_ids,
+                                                              input_ids_state = input_ids_state,
+                                                              input_mask_state = input_mask_state,
+                                                              segment_ids_state = segment_ids_state,
+                                                              labels=label_ids,
+                                                              input_token_turn_list=input_token_turn_list,
+                                                              history_type_turn_id_list=history_type_turn_id_list,
+                                                              slot_type=slot_type,
+                                                              eval_type="test")
             loss += t_loss.item()
             joint_acc += t_acc
             slot_acc += t_acc_slot
@@ -102,9 +93,9 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
     slot_acc_score = slot_acc / len(test_data)
     final_joint_acc_score = final_joint_acc / final_count
     final_slot_acc_score = final_slot_acc / final_count
-    
-    latency = np.mean(wall_times) * 1000 # ms
-    
+
+    latency = np.mean(wall_times) * 1000  # ms
+
     print("------------------------------")
     print('is_gt_p_state: %s' % (str(is_gt_p_state)))
     print("Epoch %d loss : " % epoch, loss)
@@ -115,11 +106,14 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
     print("Final slot Accuracy : ", np.mean(final_slot_acc_score))
     print("Latency Per Prediction : %f ms" % latency)
     print("-----------------------------\n")
-    
+
     if not os.path.exists("pred"):
         os.makedirs("pred")
     json.dump(results, open('pred/preds_%d.json' % epoch, 'w'), indent=4)
 
-    scores = {'epoch': epoch, 'loss': loss, 'joint_acc': joint_acc_score, 'joint_turn_acc': joint_turn_acc_score, 'slot_acc': slot_acc_score, 'ave_slot_acc': np.mean(slot_acc_score), 'final_joint_acc': final_joint_acc_score, 'final_slot_acc': final_slot_acc_score, 'final_ave_slot_acc': np.mean(final_slot_acc_score)}
-    
+    scores = {'epoch': epoch, 'loss': loss, 'joint_acc': joint_acc_score, 'joint_turn_acc': joint_turn_acc_score,
+              'slot_acc': slot_acc_score, 'ave_slot_acc': np.mean(slot_acc_score),
+              'final_joint_acc': final_joint_acc_score, 'final_slot_acc': final_slot_acc_score,
+              'final_ave_slot_acc': np.mean(final_slot_acc_score)}
+
     return scores

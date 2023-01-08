@@ -62,12 +62,16 @@ def main(args):
     # ******************************************************
     processor = Processor(args)
     slot_meta = processor.slot_meta
+
+    description = json.load(open("utils/slot_description.json", 'r'))
+    slot_type = [description[slot]["value_type"] for slot in slot_meta]
+
     label_list = processor.label_list
     num_labels = [len(labels) for labels in label_list]
     #logger.info(slot_meta)
     tokenizer = BertTokenizer.from_pretrained(args.pretrained_model)
 
-    train_data_raw = processor.get_train_instances(args.data_dir, tokenizer)[0:10]
+    train_data_raw = processor.get_train_instances(args.data_dir, tokenizer)
     print("# train examples %d" % len(train_data_raw))
 
     dev_data_raw = processor.get_dev_instances(args.data_dir, tokenizer)
@@ -146,14 +150,25 @@ def main(args):
         for step, batch in enumerate(tqdm(train_dataloader)):
             model.train()
 
-            batch = [b.to(device) if b is not None else b for b in batch]
+            #batch = [b.to(device) if b is not None else b for b in batch]
             # input_ids, segment_ids, input_mask, label_ids = batch
-            input_ids, segment_ids, input_mask, input_ids_state, segment_ids_state, input_mask_state, label_ids = batch
+            input_ids, segment_ids, input_mask, input_ids_state, segment_ids_state, input_mask_state, label_ids,\
+                input_token_turn_list, history_type_turn_id_list = batch
+
+            input_ids = input_ids.to(device)
+            segment_ids = segment_ids.to(device)
+            input_mask = input_mask.to(device)
+            input_ids_state = input_ids_state.to(device)
+            segment_ids_state = segment_ids_state.to(device)
+            input_mask_state = input_mask_state.to(device)
+            label_ids = label_ids.to(device)
 
             # forward
             loss, _, acc, _, _ = model(input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids,
                                        input_ids_state = input_ids_state, input_mask_state = input_mask_state,
-                                       segment_ids_state = segment_ids_state, labels=label_ids)
+                                       segment_ids_state = segment_ids_state, labels=label_ids,
+                                       input_token_turn_list = input_token_turn_list, history_type_turn_id_list = history_type_turn_id_list,
+                                       slot_type = slot_type)
 
             loss.backward()
             enc_optimizer.step()
@@ -280,7 +295,7 @@ if __name__ == "__main__":
                         help="Within each epoch, do evaluation as well at every eval_step")
 
     parser.add_argument("--dropout_prob", default=0.1, type=float)
-    parser.add_argument("--word_dropout", default=0.1, type=float)
+    parser.add_argument("--word_dropout", default=0.0, type=float)
 
     parser.add_argument("--max_seq_length", default=512, type=int)
     parser.add_argument("--patience", default=8, type=int)
