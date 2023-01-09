@@ -39,8 +39,20 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
         input_mask_state = torch.LongTensor([i.input_mask_state]).to(model.device)
         segment_ids_state = torch.LongTensor([i.segment_id_state]).to(model.device)
 
-        input_token_turn_list = i.input_token_turn_list
+        input_token_turn_list = np.array(i.input_token_turn_list)
         history_type_turn_id_list = i.history_type_turn_id
+
+        #print("_______input_ids__________")
+        #print(i.input_id)
+        #print(input_ids.size(1))
+        #print(input_token_turn_list.shape[0])
+        #print()
+        if input_ids.size(1) != input_token_turn_list.shape[0]:
+            f = open('dev_test_bug.txt',mode='a+')
+            f.write("dialogue_id:"+str(i.dialogue_id)+"  turn_id:"+str(i.turn_id)+'\n')
+            f.close()
+            continue
+
 
         start = time.perf_counter()
         with torch.no_grad():

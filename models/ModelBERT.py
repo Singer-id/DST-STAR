@@ -110,58 +110,85 @@ class PowerLawAttention(nn.Module):
                 grama_history = integrate(1 / (t + 1), (t, idx - 1, idx))
             grama_list.append(grama_history)
         grama_list.sort()
+        grama_list = np.array(grama_list, dtype=float)
         return grama_list
 
     def list_soft_max(self, input_list):
-        result = []
-        denominator = 0
-        for data in input_list:
-            denominator += math.exp(data)
-        for data in input_list:
-            result.append(math.exp(data) / denominator)
-        return result
+        def fun(x):
+            return np.exp(x, dtype=float)
+        exp_list = fun(input_list)
+        #print("……………………………………………………")
+        #print(exp_list)
+        denominator = np.sum(exp_list, axis=0)
+        #print(denominator)
+        exp_list /= denominator
+        #print(exp_list)
+        return exp_list
 
     def power_law_distribution(self, input_token_turn_list, history_type_turn_id_list, slot_type):
-        batch_size = input_token_turn_list.size(0)
-        max_len = input_token_turn_list.size(1)
         slot_num = len(slot_type)
 
-        batch_grama_list = np.zeros((batch_size, slot_num, max_len))
+        if input_token_turn_list.ndim == 1:
+            batch_size = 1
+            max_len = len(input_token_turn_list)
+        else:
+            batch_size = input_token_turn_list.shape[0]
+            max_len = input_token_turn_list.shape[1]
 
-        for i in range(batch_size):
-            this_turn_idx = np.max(input_token_turn_list[i])
-            grama_history_result = self.list_soft_max(self.grama_list[-(this_turn_idx+1):])
-            #print("^^^^")
-            #print(input_token_turn_list[i])
+        batch_grama_list = np.zeros((batch_size, slot_num, max_len), dtype=float)
+        #print("__________")
+        #print(batch_size)
+        #print(slot_num)
+        #print(max_len)
+        #print(batch_grama_list.shape)
+
+        if input_token_turn_list.ndim == 1:
+            this_turn_idx = np.max(input_token_turn_list)
+            grama_history_result = self.list_soft_max(self.grama_list[-(this_turn_idx + 1):])
             for j in range(slot_num):
-                batch_grama_list[i, j, :] = [grama_history_result[idx] if idx != -1 else 0 for idx in input_token_turn_list[i]]
+                batch_grama_list[0, j, :] = [grama_history_result[idx] if idx != -1 else 0 for idx in
+                                             input_token_turn_list]
+        else:
+            for i in range(batch_size):
+                this_turn_idx = np.max(input_token_turn_list[i])
+                grama_history_result = self.list_soft_max(self.grama_list[-(this_turn_idx+1):])
+                for j in range(slot_num):
+                    batch_grama_list[i, j, :] = [grama_history_result[idx] if idx != -1 else 0 for idx in input_token_turn_list[i]]
+        #print("____list____")
+        #print(batch_grama_list[:, 0, :])
 
-        for i, dict in enumerate(history_type_turn_id_list): #batch
-            for j, type in enumerate(slot_type): #slot
-                #print("^^^^")
-                #print(dict)
-                for key, turn_id_list in enumerate(dict):
+        if input_token_turn_list.ndim == 1:
+            for j, type in enumerate(slot_type):  # slot
+                for key, turn_id_list in history_type_turn_id_list.items():
                     if type == key:
+                        # print("equal")
                         grama_type_history = self.list_soft_max(self.grama_list[-len(turn_id_list):])
-
-                        for d, id in turn_id_list:
+                        for d, id in enumerate(turn_id_list):
                             for k, turn_idx in enumerate(input_token_turn_list):
                                 if turn_idx == id:
-                                    batch_grama_list[i][j][k] += grama_type_history[d]
+                                    #print(batch_grama_list[0][j][k])
+                                    batch_grama_list[0][j][k] += grama_type_history[d]
+                                    #print(batch_grama_list[0][j][k])
 
+        else:
+            for i, dict in enumerate(history_type_turn_id_list): #batch
+                for j, type in enumerate(slot_type): #slot
+                    for key, turn_id_list in dict.items():
+                        if type == key:
+                            grama_type_history = self.list_soft_max(self.grama_list[-len(turn_id_list):])
+                            for d, id in enumerate(turn_id_list):
+                                for k, turn_idx in enumerate(input_token_turn_list[i]):
+                                    if turn_idx == id:
+                                        batch_grama_list[i][j][k] += grama_type_history[d]
+        #print("-----b------")
+        #print(batch_grama_list.size())
         batch_grama_tensor = torch.LongTensor(batch_grama_list).to(self.device)
-        #print("^^^^")
-        #print(batch_grama_tensor.size())
-        #batch_grama_tensor = batch_grama_tensor.unsqueeze(1).repeat(1, 4, 1, 1)
-        print("-----b------")
-        #print(b.size())
-        print(batch_grama_tensor.size())
         return batch_grama_tensor
 
     def attention(self, q, k, v, b, d_k, mask=None, dropout=None):
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
-        #print("-----score------")
-        #print(scores.size())
+        print("-----score------")
+        print(scores.size())
         b = b.permute(0, 3, 1, 2).contiguous()
         scores += b
 

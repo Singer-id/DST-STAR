@@ -87,9 +87,9 @@ def main(args):
 
     num_train_steps = int(len(train_data_raw) / args.train_batch_size * args.n_epochs)
     logger.info("***** Run training *****")
-    logger.info(" Num examples = %d", len(train_data_raw))
-    logger.info(" Batch size = %d", args.train_batch_size)
-    logger.info(" Num steps = %d", num_train_steps)
+    #logger.info(" Num examples = %d", len(train_data_raw))
+    #logger.info(" Batch size = %d", args.train_batch_size)
+    #logger.info(" Num steps = %d", num_train_steps)
 
     train_sampler = RandomSampler(train_data)
     train_dataloader = DataLoader(train_data,
@@ -284,7 +284,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--random_seed", default=42, type=int)
     parser.add_argument("--num_workers", default=4, type=int)
-    parser.add_argument("--train_batch_size", default=16, type=int)
+    parser.add_argument("--train_batch_size", default=8, type=int)
     parser.add_argument("--enc_warmup", default=0.1, type=float)
     parser.add_argument("--dec_warmup", default=0.1, type=float)
     parser.add_argument("--enc_lr", default=4e-5, type=float)

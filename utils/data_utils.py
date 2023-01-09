@@ -81,7 +81,7 @@ class Processor(object):
         last_dialogue_state = {}
         history_uttr = []
         
-        for (i, line) in enumerate(lines[0:10]):
+        for (i, line) in enumerate(lines):
             dialogue_idx = line[0]
             turn_idx = int(line[1])
             is_last_turn = (line[2] == "True")
@@ -145,6 +145,12 @@ class Processor(object):
             #print(instance.turn_id)
             #print(instance.diag)
             #print(instance.input_token_turn_list)
+
+            if len(instance.input_id) != len(instance.input_token_turn_list):
+                file = open('train_bug.txt', mode='a+')
+                file.write("dialogue_id:" + str(instance.dialogue_id) + "  turn_id:" + str(instance.turn_id) + '\n')
+                file.close()
+                continue
 
             instances.append(instance)
             last_dialogue_state = turn_dialogue_state
@@ -302,10 +308,6 @@ class MultiWozDataset(Dataset):
         input_ids_state, segment_ids_state, input_mask_state = padding(input_ids_state_list, segment_ids_state_list,
                                                                        input_mask_state_list, torch.LongTensor([0]))
         label_ids = torch.tensor([f.label_ids for f in batch], dtype=torch.long)
-        #print("^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
-        #print(input_ids.size())
-        #print(len(input_ids_list[0]))
-        #print(len(input_token_turn_list[0]))
 
         # padding
         max_len = max([len(i) for i in input_ids_list])
@@ -313,6 +315,8 @@ class MultiWozDataset(Dataset):
         for i in range(len(input_token_turn_list)):
             result1[i, :len(input_token_turn_list[i])] = input_token_turn_list[i]
         input_token_turn_list = result1
+
+        #history_type_turn_id_list = np.array(history_type_turn_id_list)
 
         return input_ids, segment_ids, input_mask, input_ids_state, segment_ids_state, input_mask_state, label_ids, \
                input_token_turn_list, history_type_turn_id_list
