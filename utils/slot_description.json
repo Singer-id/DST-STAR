@@ -27,7 +27,7 @@
         "description_human": "whether the hotel has parking",
         "values": [
             "dontcare",
-            "free",
+            "free", //TODO
             "no",
             "yes"
         ],

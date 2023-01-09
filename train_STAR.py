@@ -151,7 +151,6 @@ def main(args):
             model.train()
 
             #batch = [b.to(device) if b is not None else b for b in batch]
-            # input_ids, segment_ids, input_mask, label_ids = batch
             input_ids, segment_ids, input_mask, input_ids_state, segment_ids_state, input_mask_state, label_ids,\
                 input_token_turn_list, history_type_turn_id_list = batch
 

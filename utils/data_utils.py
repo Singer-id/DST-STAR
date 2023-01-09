@@ -80,8 +80,9 @@ class Processor(object):
         last_uttr = None
         last_dialogue_state = {}
         history_uttr = []
-        
-        for (i, line) in enumerate(lines):
+
+        #lines = lines[9074:9094]
+        for (i, line) in enumerate(lines[0:10]):
             dialogue_idx = line[0]
             turn_idx = int(line[1])
             is_last_turn = (line[2] == "True")
@@ -97,8 +98,8 @@ class Processor(object):
             if turn_idx == 0: # a new dialogue
                 last_dialogue_state = {}
                 history_uttr = []
-                history_type_turn_id = {}
-                history_token_turn_list = []
+                history_type_turn_id = {} # json {adj:[],num:[]} 手动打标签
+                history_token_turn_id = []
                 last_uttr = ""
                 for slot in self.slot_meta:
                     last_dialogue_state[slot] = "none"
@@ -107,7 +108,7 @@ class Processor(object):
             for s, slot in enumerate(self.slot_meta):
                 if last_dialogue_state[slot] != turn_dialogue_state[slot]:
                     turn_only_label.append(slot + "-" + turn_dialogue_state[slot])
-
+                    #打标签
                     if turn_dialogue_state[slot] not in ["none","true","false","do not care"] :
                         value_type = self.description[slot]["value_type"]
                         if value_type not in history_type_turn_id: #添加key，初始化value
@@ -119,60 +120,121 @@ class Processor(object):
             history_uttr.append(last_uttr)
 
             text_a = (system_response + " " + user_utterance).strip()
-            #text_b = ' '.join(history_uttr[-self.config.num_history:])
-            text_b = ' '.join(history_uttr)
+            text_b = ' '.join(history_uttr) # 所有历史的拼接
 
             last_uttr = text_a
 
-            # ID, turn_id, turn_utter, dialogue_history, label_ids,
-            # turn_label, curr_turn_state, last_turn_state, history_type_turn_id
-            # max_seq_length, slot_meta, is_last_turn, ontology
-            instance = TrainingInstance(dialogue_idx, turn_idx, text_a, text_b, turn_dialogue_state_ids,
-                                        turn_only_label, turn_dialogue_state, last_dialogue_state, history_type_turn_id,
-                                        self.config.max_seq_length, self.slot_meta, is_last_turn, self.ontology)
+            #手动make_instance(考虑train 和 test时make_instance的情况，设计好之后把函数提出去
+            max_seq_length = self.config.max_seq_length
 
-            instance.make_instance(tokenizer)
-            diag_2_length = instance.diag_2_length
+            if max_seq_length is None:
+                max_seq_length = self.max_seq_length
 
-            avail_length = self.config.max_seq_length - 3 - len(instance.token_turn_id)
+            state = []
+            for slot in self.slot_meta:
+                s = slot_recovery(slot)
+                k = s.split('-')
+                v = last_dialogue_state[slot].lower()  # use the original slot name as index
+                if v == "none":
+                    continue
+                k.extend([v])  # without symbol "-"
+                t = tokenizer.tokenize(' '.join(k))
+                state.extend(t)
 
-            if avail_length > 0 and (diag_2_length > avail_length):
+            if not state:
+                state.extend("null")
+
+            avail_length_1 = max_seq_length - 3
+            diag_1 = tokenizer.tokenize(text_a)
+            diag_2 = tokenizer.tokenize(text_b)
+
+            diag_1_length = len(diag_1)
+            diag_2_length = len(diag_2)
+            avail_length = avail_length_1 - diag_1_length
+
+            token_turn_id = [turn_idx] * diag_1_length
+
+            if diag_2_length > avail_length:  # truncated
                 avail_length = diag_2_length - avail_length
-                history_token_turn_list = history_token_turn_list[avail_length:]
+                diag_2 = diag_2[avail_length:]
+                history_temp = history_token_turn_id[avail_length:]
+                input_token_turn_id = [-1] + history_temp + [-1] + token_turn_id + [-1]
+            elif (diag_2_length == 0) and (diag_1_length > avail_length_1):
+                avail_length = diag_1_length - avail_length_1
+                diag_1 = diag_1[avail_length:]
+                temp = token_turn_id[avail_length:]
+                input_token_turn_id = [-1] + history_token_turn_id + [-1] + temp + [-1]
+            else:
+                input_token_turn_id = [-1] + history_token_turn_id + [-1] + token_turn_id + [-1]
 
-            instance.input_token_turn_list = [-1] + history_token_turn_list + [-1] + instance.token_turn_id +[-1]
+            # we keep the order
+            #drop_mask = [0] + [1] * diag_2_length + [0] + [1] * diag_1_length + [0]  # word dropout
+            #TODO drop_mask
+            diag_2 = ["[CLS]"] + diag_2 + ["[SEP]"]
+            diag_1 = diag_1 + ["[SEP]"]
+            diag = diag_2 + diag_1
 
-            #print(instance.turn_id)
-            #print(instance.diag)
-            #print(instance.input_token_turn_list)
+            '''
+            # word dropout
+            if self.config.word_dropout > 0.:
+                drop_mask = np.array(drop_mask)
+                word_drop = np.random.binomial(drop_mask.astype('int64'), self.config.word_dropout)
+                diag = [w if word_drop[i] == 0 else '[UNK]' for i, w in enumerate(diag)]
+            '''
+            input_id = tokenizer.convert_tokens_to_ids(diag)
+            segment_id = [0] * len(diag_2) + [1] * len(diag_1)
+            input_mask = [1] * len(diag)
 
-            if len(instance.input_id) != len(instance.input_token_turn_list):
+            input_id_state = tokenizer.convert_tokens_to_ids(state)
+            segment_id_state = [0] * len(state)
+            input_mask_state = [1] * len(state)
+
+
+            '''
+            if len(self.input_id) != len(input_token_turn_list):
                 file = open('train_bug.txt', mode='a+')
-                file.write("dialogue_id:" + str(instance.dialogue_id) + "  turn_id:" + str(instance.turn_id) + '\n')
+                file.write("dialogue_id:" + str(dialogue_idx) + "  turn_id:" + str(turn_idx) + '\n')
                 file.close()
                 continue
+            '''
+            # ID, turn_id, turn_utter, dialogue_history, label_ids,
+            # turn_label, curr_turn_state, last_turn_state,
+            # history_type_turn_id, input_token_turn_id,
+            # input_id, segment_id, input_mask, input_id_state, segment_id_state, input_mask_state,
+            # max_seq_length, slot_meta, is_last_turn, ontology
 
+            instance = TrainingInstance(dialogue_idx, turn_idx, text_a, text_b, turn_dialogue_state_ids,
+                                        turn_only_label, turn_dialogue_state, last_dialogue_state,
+                                        history_type_turn_id, input_token_turn_id,
+                                        input_id, segment_id, input_mask, input_id_state, segment_id_state, input_mask_state,
+                                        self.config.max_seq_length, self.slot_meta, is_last_turn, self.ontology)
             instances.append(instance)
             last_dialogue_state = turn_dialogue_state
-            history_token_turn_list += instance.token_turn_id  #token_turn_id是本轮的
+            history_token_turn_id += token_turn_id
+
+            #print("——————————————")
+            #print(diag_1)
+            #print(token_turn_id)
+            #print(diag_2)
+            #print(history_token_turn_id)
+            #print(dialogue_idx)
+            #print(diag)
+            #print(input_token_turn_id)
+            #print("^^^^")
+            #print(len(diag))
+            #print(len(input_token_turn_id))
+
 
         return instances
             
 
 class TrainingInstance(object):
-    def __init__(self, ID,
-                 turn_id,
-                 turn_utter,
-                 dialogue_history,
-                 label_ids,
-                 turn_label,
-                 curr_turn_state,
-                 last_turn_state,
-                 history_type_turn_id,
-                 max_seq_length,
-                 slot_meta,
-                 is_last_turn,
-                 ontology):
+    def __init__(self, ID, turn_id, turn_utter, dialogue_history, label_ids,
+                 turn_label, curr_turn_state, last_turn_state,
+                 history_type_turn_id, input_token_turn_id,
+                 input_id, segment_id, input_mask, input_id_state, segment_id_state, input_mask_state,
+                 max_seq_length, slot_meta, is_last_turn, ontology):
+
         self.dialogue_id = ID
         self.turn_id = turn_id
         self.turn_utter = turn_utter
@@ -186,24 +248,28 @@ class TrainingInstance(object):
         self.label_ids = label_ids
 
         self.history_type_turn_id = history_type_turn_id
+        self.input_token_turn_id = input_token_turn_id
+
+        self.input_id =  input_id
+        self.segment_id = segment_id
+        self.input_mask = input_mask
+
+        self.input_id_state = input_id_state
+        self.segment_id_state = segment_id_state
+        self.input_mask_state = input_mask_state
        
         self.max_seq_length = max_seq_length
         self.slot_meta = slot_meta
         self.is_last_turn = is_last_turn
         
         self.ontology = ontology
-        #self.input_token_turn_list = None
 
-    def make_instance(self, tokenizer, max_seq_length=None, word_dropout=0., state_dropout=0.):
-        if max_seq_length is None:
-            max_seq_length = self.max_seq_length
-
+    def renew_instance_state(self, tokenizer):
         state = []
         for slot in self.slot_meta:
             s = slot_recovery(slot)
             k = s.split('-')
             v = self.last_dialogue_state[slot].lower()  # use the original slot name as index
-            #print(self.last_dialogue_state)
             if v == "none":
                 continue
             k.extend([v])  # without symbol "-"
@@ -211,54 +277,10 @@ class TrainingInstance(object):
             state.extend(t)
         if not state:
             state.extend("null")
-        #self.state = state
-        #print(state)
-        # avail_length_1 = max_seq_length - len(state) - 3
-        avail_length_1 = max_seq_length - 3
-        diag_1 = tokenizer.tokenize(self.turn_utter)
-        diag_2 = tokenizer.tokenize(self.dialogue_history)
-        avail_length = avail_length_1 - len(diag_1)
 
-        self.token_turn_id = [self.turn_id] * len(diag_1)
-        self.diag_2_length = len(diag_2)
-
-        if avail_length <= 0:
-            diag_2 = []
-        elif len(diag_2) > avail_length:  # truncated
-            avail_length = len(diag_2) - avail_length
-            diag_2 = diag_2[avail_length:]
-
-        if len(diag_2) == 0 and len(diag_1) > avail_length_1:
-            avail_length = len(diag_1) - avail_length_1
-            diag_1 = diag_1[avail_length:]
-            self.token_turn_id = self.token_turn_id[avail_length:]
-
-        # we keep the order
-        drop_mask = [0] + [1] * len(diag_2) + [0] + [1] * len(diag_1) + [0]  # word dropout
-        diag_2 = ["[CLS]"] + diag_2 + ["[SEP]"]
-        diag_1 = diag_1 + ["[SEP]"]
-        #self.token_turn_id.append(-1) #sep
-        diag = diag_2 + diag_1
-        self.diag = diag
-        # word dropout
-        if word_dropout > 0.:
-            drop_mask = np.array(drop_mask)
-            word_drop = np.random.binomial(drop_mask.astype('int64'), word_dropout)
-            diag = [w if word_drop[i] == 0 else '[UNK]' for i, w in enumerate(diag)]
-
-        self.input_ = diag
-        self.input_id = tokenizer.convert_tokens_to_ids(self.input_)
-        segment = [0] * len(diag_2) + [1] * len(diag_1)
-        self.segment_id = segment
-        input_mask = [1] * len(self.input_)
-        self.input_mask = input_mask
-
-        self.input_state = state
-        self.input_id_state = tokenizer.convert_tokens_to_ids(self.input_state)
-        segment_state = [0] * len(state)
-        self.segment_id_state = segment_state
-        input_mask_state = [1] * len(self.input_state)
-        self.input_mask_state = input_mask_state
+        self.input_id_state = tokenizer.convert_tokens_to_ids(state)
+        self.segment_id_state = [0] * len(state)
+        self.input_mask_state = [1] * len(state)
 
 
 class MultiWozDataset(Dataset):
@@ -273,7 +295,7 @@ class MultiWozDataset(Dataset):
         return self.len
 
     def __getitem__(self, idx):
-        self.data[idx].make_instance(self.tokenizer, word_dropout=self.word_dropout, state_dropout=self.state_dropout)
+        #self.data[idx].make_instance(self.tokenizer, word_dropout=self.word_dropout, state_dropout=self.state_dropout)
         return self.data[idx]
 
     def collate_fn(self, batch):
@@ -301,7 +323,7 @@ class MultiWozDataset(Dataset):
             segment_ids_state_list.append(torch.LongTensor(f.segment_id_state))
             input_mask_state_list.append(torch.LongTensor(f.input_mask_state))
 
-            input_token_turn_list.append(f.input_token_turn_list)
+            input_token_turn_list.append(f.input_token_turn_id)
             history_type_turn_id_list.append(f.history_type_turn_id) #[{adj:[],type:[]}{adj:[]}] 没有to tensor
 
         input_ids, segment_ids, input_mask = padding(input_ids_list, segment_ids_list, input_mask_list, torch.LongTensor([0]))

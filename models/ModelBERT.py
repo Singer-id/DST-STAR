@@ -494,10 +494,8 @@ class Decoder(nn.Module):
         slot_embedding = slot_lookup.weight[target_slots, :]  # select target slots' embeddings
         slot_utter_emb = self.slot_history_attn(slot_embedding, sequence_output, attention_mask,
                                                 input_token_turn_list, history_type_turn_id_list, slot_type)
-        #print(slot_utter_emb.size())
-
         slot_state_emb = self.slot_state_attn(slot_embedding, state_output, input_mask_state)
-        #print(slot_state_emb.size())
+
         # concatenate with slot_embedding
         slot_utter_embedding = torch.cat((slot_embedding.unsqueeze(0).repeat(batch_size, 1, 1), slot_utter_emb), 2)
         slot_state_embedding = torch.cat((slot_embedding.unsqueeze(0).repeat(batch_size, 1, 1), slot_state_emb), 2)

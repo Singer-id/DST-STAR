@@ -28,7 +28,7 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
             last_dialogue_state = deepcopy(i.gold_last_state)
 
         i.last_dialogue_state = deepcopy(last_dialogue_state)
-        i.make_instance(tokenizer)
+        i.renew_instance_state(tokenizer)
 
         input_ids = torch.LongTensor([i.input_id]).to(model.device)
         input_mask = torch.LongTensor([i.input_mask]).to(model.device)
@@ -39,7 +39,7 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
         input_mask_state = torch.LongTensor([i.input_mask_state]).to(model.device)
         segment_ids_state = torch.LongTensor([i.segment_id_state]).to(model.device)
 
-        input_token_turn_list = np.array(i.input_token_turn_list)
+        input_token_turn_list = np.array(i.input_token_turn_id)
         history_type_turn_id_list = i.history_type_turn_id
 
         #print("_______input_ids__________")
