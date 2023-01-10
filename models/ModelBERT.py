@@ -5,9 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from copy import deepcopy
 from torch.nn import CrossEntropyLoss
-from transformers import BertPreTrainedModel, BertModel
+from transformers import BertPreTrainedModel, BertModel, BertTokenizer
 from sympy import *
-
+from utils.label_lookup import get_label_ids
 
 class UtteranceEncoding(BertPreTrainedModel):
     def __init__(self, config):
@@ -187,8 +187,8 @@ class PowerLawAttention(nn.Module):
 
     def attention(self, q, k, v, b, d_k, mask=None, dropout=None):
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
-        print("-----score------")
-        print(scores.size())
+        #print("-----score------")
+        #print(scores.size())
         b = b.permute(0, 3, 1, 2).contiguous()
         scores += b
 
@@ -218,8 +218,8 @@ class PowerLawAttention(nn.Module):
         v = v.transpose(1, 2)
 
         b = self.b_encoder(self.power_law_distribution(input_token_turn_list, history_type_turn_id_list, slot_type))
-        print("-----b encode------")
-        print(b.size())
+        #print("-----b encode------")
+        #print(b.size())
         scores = self.attention(q, k, v, b, self.d_k, mask, self.dropout)
 
         # concatenate heads and put through final linear layer
@@ -401,13 +401,13 @@ class FusionGate(nn.Module):
         return fusion_result
 
 class Decoder(nn.Module):
-    def __init__(self, args, model_output_dim, num_labels, slot_value_pos, device):
+    def __init__(self, args, model_output_dim, device):
         super(Decoder, self).__init__()
         self.model_output_dim = model_output_dim
-        self.num_slots = len(num_labels)
-        self.num_total_labels = sum(num_labels)
-        self.num_labels = num_labels
-        self.slot_value_pos = slot_value_pos
+        #self.num_slots = len(num_labels)
+        #self.num_total_labels = sum(num_labels)
+        #self.num_labels = num_labels
+        #self.slot_value_pos = slot_value_pos
         self.attn_head = args.attn_head
         self.device = device
         self.args = args
@@ -452,16 +452,18 @@ class Decoder(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
         self.nll = CrossEntropyLoss(ignore_index=-1)
 
-    def slot_value_matching(self, value_lookup, hidden, target_slots, labels):
+    def slot_value_matching(self, value_lookup, hidden, target_slots, labels, num_total_labels, slot_value_pos):
         loss = 0.
         loss_slot = []
         pred_slot = []
 
         batch_size = hidden.size(0)
-        value_emb = value_lookup.weight[0:self.num_total_labels, :]
+        #value_emb = value_lookup.weight[0:num_total_labels, :]
+        #print("^^^^^^^")
+        #print(value_emb.size())
 
         for s, slot_id in enumerate(target_slots):  # note: target_slots are successive
-            hidden_label = value_emb[self.slot_value_pos[slot_id][0]:self.slot_value_pos[slot_id][1], :]
+            hidden_label = value_lookup[slot_value_pos[slot_id][0]:slot_value_pos[slot_id][1], :]
             num_slot_labels = hidden_label.size(0)  # number of value choices for each slot
 
             _hidden_label = hidden_label.unsqueeze(0).repeat(batch_size, 1, 1).reshape(batch_size * num_slot_labels, -1)
@@ -476,6 +478,9 @@ class Decoder(nn.Module):
             pred_slot.append(pred.view(batch_size, 1))
 
             _loss = self.nll(_dist, labels[:, s])
+            #print("^^^^^^")
+            #print(pred)
+            #print(labels[:, s])
 
             loss += _loss
             loss_slot.append(_loss.item())
@@ -485,13 +490,17 @@ class Decoder(nn.Module):
         return loss, loss_slot, pred_slot
 
     def forward(self, sequence_output, state_output, attention_mask, input_mask_state, labels, slot_lookup, value_lookup,
-                input_token_turn_list, history_type_turn_id_list, slot_type, eval_type="train"):
+                input_token_turn_list, history_type_turn_id_list, slot_type, num_labels, slot_value_pos, eval_type="train"):
+
+        num_slots = len(num_labels)
+        num_total_labels = sum(num_labels)
 
         batch_size = sequence_output.size(0)
-        target_slots = list(range(0, self.num_slots))
+        target_slots = list(range(0, num_slots))
 
         # slot utterance attention
-        slot_embedding = slot_lookup.weight[target_slots, :]  # select target slots' embeddings
+        #slot_embedding = slot_lookup.weight[target_slots, :]  # select target slots' embeddings
+        slot_embedding = slot_lookup
         slot_utter_emb = self.slot_history_attn(slot_embedding, sequence_output, attention_mask,
                                                 input_token_turn_list, history_type_turn_id_list, slot_type)
         slot_state_emb = self.slot_state_attn(slot_embedding, state_output, input_mask_state)
@@ -510,48 +519,66 @@ class Decoder(nn.Module):
         hidden_slot = self.slot_self_attn(hidden_state)
 
         # prediction
-        hidden = self.pred(hidden_slot)
+        hidden = self.pred(hidden_slot) # batch_size * 30 * 768
 
         # slot value matching
-        loss, loss_slot, pred_slot = self.slot_value_matching(value_lookup, hidden, target_slots, labels)
+        loss, loss_slot, pred_slot = self.slot_value_matching(value_lookup, hidden, target_slots, labels,
+                                                              num_total_labels, slot_value_pos)
 
         return loss, loss_slot, pred_slot
 
 
 class BeliefTracker(nn.Module):
-    def __init__(self, args, slot_lookup, value_lookup, num_labels, slot_value_pos, device):
+    def __init__(self, args, slot_lookup, device):
         super(BeliefTracker, self).__init__()
 
-        self.num_slots = len(num_labels)
-        self.num_labels = num_labels
-        self.slot_value_pos = slot_value_pos
+        #self.num_slots = len(num_labels)
+        #self.num_labels = num_labels
+        #self.slot_value_pos = slot_value_pos
         self.args = args
         self.device = device
         self.slot_lookup = slot_lookup
-        self.value_lookup = value_lookup
+        #self.value_lookup = value_lookup
 
         self.encoder = UtteranceEncoding.from_pretrained(self.args.pretrained_model)
         self.model_output_dim = self.encoder.config.hidden_size
-        self.decoder = Decoder(args, self.model_output_dim, self.num_labels, self.slot_value_pos, device)
+        self.decoder = Decoder(args, self.model_output_dim, device)
 
     def forward(self, input_ids, attention_mask, token_type_ids, input_ids_state, input_mask_state, segment_ids_state, labels,
-                input_token_turn_list, history_type_turn_id_list, slot_type, eval_type="train"):
+                input_token_turn_list, history_type_turn_id_list, slot_type, num_labels, slot_value_pos,
+                value_lookup=None, _label_ids=None, _label_type_ids=None, _label_mask=None,
+                eval_type="train"):
+
         batch_size = input_ids.size(0)
-        num_slots = self.num_slots
+        num_slots = len(num_labels)
 
         # encoder, a pretrained model, output is a tuple
         sequence_output = self.encoder(input_ids, attention_mask, token_type_ids)[0]
 
         state_output = self.encoder(input_ids_state, input_mask_state, segment_ids_state)[0]
         state_output = state_output.detach()
+        #TODO 梯度到底有没有，查看warning？
+
+        if eval_type == "test": #有new_label_list，没有value_lookup
+            # _label_ids, _label_lens = get_label_ids(new_label_list, BertTokenizer.from_pretrained(self.args.pretrained_model))
+            # _label_ids = _label_ids.to(self.device)
+            # _label_type_ids = torch.zeros(_label_ids.size(), dtype=torch.long).to(self.device)
+            # _label_mask = (_label_ids > 0).to(self.device)
+            value_lookup = self.encoder(_label_ids, _label_mask, _label_type_ids)[1].detach()
+            #value_lookup = nn.Embedding.from_pretrained(hid_label, freeze=True)
 
         # decoder
         loss, loss_slot, pred_slot = self.decoder(sequence_output, state_output, attention_mask, input_mask_state,
-                                                  labels, self.slot_lookup, self.value_lookup,
-                                                  input_token_turn_list, history_type_turn_id_list, slot_type, eval_type)
+                                                  labels, self.slot_lookup, value_lookup,
+                                                  input_token_turn_list, history_type_turn_id_list, slot_type,
+                                                  num_labels, slot_value_pos, eval_type)
 
         # calculate accuracy
         accuracy = pred_slot == labels
+        # if eval_type == "test":
+        #print("--^^^^^^^^--")
+        #print(pred_slot)
+        #print(labels)
         acc_slot = torch.true_divide(torch.sum(accuracy, 0).float(), batch_size).cpu().detach().numpy()  # slot accuracy
         acc = torch.sum(
             torch.floor_divide(torch.sum(accuracy, 1), num_slots)).float().item() / batch_size  # joint accuracy

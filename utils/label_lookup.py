@@ -77,8 +77,7 @@ def get_label_lookup(labels, tokenizer, sv_encoder, device, use_layernorm=True):
 
 def get_label_lookup_from_first_token(labels, tokenizer, sv_encoder, device, use_layernorm=False):
     model_output_dim = sv_encoder.config.hidden_size
-    #label_lookup = nn.Embedding(len(labels), model_output_dim)
-    
+
     sv_encoder.eval() 
     LN = nn.LayerNorm(model_output_dim, elementwise_affine=False)
     
@@ -89,10 +88,25 @@ def get_label_lookup_from_first_token(labels, tokenizer, sv_encoder, device, use
     label_type_ids = torch.zeros(label_ids.size(), dtype=torch.long)
     label_mask = (label_ids > 0)
     hid_label = sv_encoder(label_ids, label_mask, label_type_ids)[0]
+
+    hid_label = hid_label[:, 0, :]
+    hid_label = hid_label.detach().to(device)
+    if use_layernorm:
+        hid_label = LN(hid_label).to(device)
+    #label_lookup = nn.Embedding.from_pretrained(hid_label, freeze=True).to(device)
+
+    return hid_label
+
+
+def get_label_lookup_from_first_token_2(new_label_list, tokenizer, sv_encoder, device):
+    # get label ids
+    label_ids, label_lens = get_label_ids(new_label_list, tokenizer)
+    label_type_ids = torch.zeros(label_ids.size(), dtype=torch.long)
+    label_mask = (label_ids > 0)
+    hid_label = sv_encoder(label_ids, label_mask, label_type_ids)[0]
+
     hid_label = hid_label[:, 0, :]
     hid_label = hid_label.detach()
-    if use_layernorm:
-        hid_label = LN(hid_label)
     label_lookup = nn.Embedding.from_pretrained(hid_label, freeze=True).to(device)
 
     return label_lookup

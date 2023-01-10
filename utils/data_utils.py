@@ -8,7 +8,6 @@ import re
 import os
 from copy import deepcopy
 
-
 def slot_recovery(slot):
     if "pricerange" in slot:
         return slot.replace("pricerange", "price range")
@@ -40,8 +39,10 @@ class Processor(object):
         self.config = config
         self.domains = sorted(list(set([slot.split("-")[0] for slot in self.slot_meta])))
         self.num_domains = len(self.domains)
-        self.domain_slot_pos = [] # the position of slots within the same domain
-        self.description = json.load(open("utils/slot_description.json", 'r'))
+        self.domain_slot_pos = [] # the position of slots within the same domai
+
+        description = json.load(open("utils/slot_description.json", 'r'))
+        self.slot_type = [description[slot]["value_type"] for slot in self.slot_meta]
 
         cnt = {}
         for slot in self.slot_meta:
@@ -74,6 +75,12 @@ class Processor(object):
     def get_test_instances(self, data_dir, tokenizer):
         return self._create_instances(self._read_tsv(os.path.join(data_dir, "test.tsv")), tokenizer)
 
+    def get_candidate_label_map(self, candidate_dict):
+        label_list = []
+        for type in self.slot_type:
+            label_list.append(candidate_dict[type])
+        label_map = [{label: i for i, label in enumerate(labels)} for labels in label_list]
+        return label_map, label_list
 
     def _create_instances(self, lines, tokenizer):
         instances = []
@@ -82,7 +89,7 @@ class Processor(object):
         history_uttr = []
 
         #lines = lines[9074:9094]
-        for (i, line) in enumerate(lines[0:10]):
+        for (i, line) in enumerate(lines[0:1000]):
             dialogue_idx = line[0]
             turn_idx = int(line[1])
             is_last_turn = (line[2] == "True")
@@ -90,32 +97,72 @@ class Processor(object):
             user_utterance = line[4]
             turn_dialogue_state = {}
             turn_dialogue_state_ids = []
+            candidate_label_ids = []
 
             for idx in self.slot_idx:
                 turn_dialogue_state[self.slot_meta[idx]] = line[5+idx]
-                turn_dialogue_state_ids.append(self.label_map[idx][line[5+idx]])
+                turn_dialogue_state_ids.append(self.label_map[idx][line[5+idx]]) #固定候选值集合获得的label_id
 
             if turn_idx == 0: # a new dialogue
                 last_dialogue_state = {}
                 history_uttr = []
                 history_type_turn_id = {} # json {adj:[],num:[]} 手动打标签
                 history_token_turn_id = []
+                candidate_dict = {
+                    "adj":["none","do not care"],
+                    "num":["none","do not care"],
+                    "type":["none","do not care","true","false"],
+                    "location":["none","do not care"],
+                    "time":["none","do not care"],
+                    "name":["none","do not care"],
+                    "day":["none","do not care"],
+                    "area": ["none", "do not care"],
+                    "food": ["none", "do not care"],
+                    "bool":["do not care","false","none","true"]
+                } #伪候选值集合
                 last_uttr = ""
                 for slot in self.slot_meta:
                     last_dialogue_state[slot] = "none"
                 
             turn_only_label = [] # turn label
             for s, slot in enumerate(self.slot_meta):
-                if last_dialogue_state[slot] != turn_dialogue_state[slot]:
-                    turn_only_label.append(slot + "-" + turn_dialogue_state[slot])
+                value = turn_dialogue_state[slot]
+                if last_dialogue_state[slot] != value:
+                    turn_only_label.append(slot + "-" + value)
                     #打标签
-                    if turn_dialogue_state[slot] not in ["none","true","false","do not care"] :
-                        value_type = self.description[slot]["value_type"]
+                    if value not in ["none", "true", "false", "do not care"] :
+                        value_type = self.slot_type[s]
                         if value_type not in history_type_turn_id: #添加key，初始化value
                             history_type_turn_id[value_type] = []
 
-                        if turn_idx not in history_type_turn_id[value_type]: #构建实体类型_turn列表
+                        if turn_idx not in history_type_turn_id[value_type]: #构建伪type_turn_id_list
                             history_type_turn_id[value_type].append(turn_idx)
+
+                    #伪候选值集合
+                    if value not in candidate_dict[value_type]:
+                        candidate_dict[value_type].append(value)
+
+            #print("---&&&&&---")
+            #print(candidate_dict)
+            #构造对应于本轮候选值集合的label_id
+            candidate_label_map, candidate_label_list = self.get_candidate_label_map(candidate_dict)
+            #print(candidate_label_map)
+            #print(candidate_label_list)
+            for idx in self.slot_idx:
+                #print("dialogue_idx:"+str(dialogue_idx))
+                #print("turn_idx:"+str(turn_idx))
+                #print("slot_idx:"+str(idx))
+                #x = candidate_label_map[idx]
+                #print(x)
+                #y = line[5+idx]
+                #print(y)
+                #print(x==y)
+                #print(type(x))
+                #print(type(y))
+                #print(candidate_label_map[idx][line[5+idx]])
+                candidate_label_ids.append(candidate_label_map[idx][line[5+idx]]) #新候选值集合对于的label_id
+            #print(turn_dialogue_state)
+            #print(candidate_label_ids)
 
             history_uttr.append(last_uttr)
 
@@ -124,7 +171,6 @@ class Processor(object):
 
             last_uttr = text_a
 
-            #手动make_instance(考虑train 和 test时make_instance的情况，设计好之后把函数提出去
             max_seq_length = self.config.max_seq_length
 
             if max_seq_length is None:
@@ -204,6 +250,7 @@ class Processor(object):
             # max_seq_length, slot_meta, is_last_turn, ontology
 
             instance = TrainingInstance(dialogue_idx, turn_idx, text_a, text_b, turn_dialogue_state_ids,
+                                        candidate_label_ids, candidate_label_list,
                                         turn_only_label, turn_dialogue_state, last_dialogue_state,
                                         history_type_turn_id, input_token_turn_id,
                                         input_id, segment_id, input_mask, input_id_state, segment_id_state, input_mask_state,
@@ -224,12 +271,12 @@ class Processor(object):
             #print(len(diag))
             #print(len(input_token_turn_id))
 
-
         return instances
             
 
 class TrainingInstance(object):
     def __init__(self, ID, turn_id, turn_utter, dialogue_history, label_ids,
+                 candidate_label_ids, candidate_label_list,
                  turn_label, curr_turn_state, last_turn_state,
                  history_type_turn_id, input_token_turn_id,
                  input_id, segment_id, input_mask, input_id_state, segment_id_state, input_mask_state,
@@ -246,6 +293,9 @@ class TrainingInstance(object):
         
         self.turn_label = turn_label
         self.label_ids = label_ids
+
+        self.candidate_label_ids = candidate_label_ids #真实候选值id（对应于candidate_label_list
+        self.candidate_label_list = candidate_label_list #当轮候选值集合拼成的列表
 
         self.history_type_turn_id = history_type_turn_id
         self.input_token_turn_id = input_token_turn_id

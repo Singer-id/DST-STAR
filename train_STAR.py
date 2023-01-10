@@ -20,7 +20,9 @@ from models.ModelBERT import BeliefTracker
 
 from transformers import BertTokenizer
 from transformers import AdamW, get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
+from transformers import logging as transformers_logging
 
+transformers_logging.set_verbosity_warning()
 # os.environ['CUDA_VISIBLE_DEVICES']='0'
 torch.cuda.set_device(0)
 
@@ -111,7 +113,7 @@ def main(args):
     slot_lookup = get_label_lookup_from_first_token(slot_meta, tokenizer, sv_encoder, device) # 固定参数的bert
     value_lookup = get_label_lookup_from_first_token(new_label_list, tokenizer, sv_encoder, device)
 
-    model = BeliefTracker(args, slot_lookup, value_lookup, num_labels, slot_value_pos, device)
+    model = BeliefTracker(args, slot_lookup, device)
     model.to(device)
 
     ## prepare optimizer
@@ -163,11 +165,19 @@ def main(args):
             label_ids = label_ids.to(device)
 
             # forward
-            loss, _, acc, _, _ = model(input_ids=input_ids, attention_mask=input_mask, token_type_ids=segment_ids,
-                                       input_ids_state = input_ids_state, input_mask_state = input_mask_state,
-                                       segment_ids_state = segment_ids_state, labels=label_ids,
-                                       input_token_turn_list = input_token_turn_list, history_type_turn_id_list = history_type_turn_id_list,
-                                       slot_type = slot_type)
+            loss, _, acc, _, _ = model(input_ids=input_ids,
+                                       attention_mask=input_mask,
+                                       token_type_ids=segment_ids,
+                                       input_ids_state = input_ids_state,
+                                       input_mask_state = input_mask_state,
+                                       segment_ids_state = segment_ids_state,
+                                       labels=label_ids,
+                                       input_token_turn_list = input_token_turn_list,
+                                       history_type_turn_id_list = history_type_turn_id_list,
+                                       slot_type = slot_type,
+                                       value_lookup = value_lookup,
+                                       num_labels = num_labels,
+                                       slot_value_pos = slot_value_pos)
 
             loss.backward()
             enc_optimizer.step()
@@ -186,7 +196,7 @@ def main(args):
 
             if epoch > args.n_epochs / 2 and step > 0 and step % args.eval_step == 0:
                 eval_res = model_evaluation(model, dev_data_raw, tokenizer, slot_meta, label_list,
-                                            epoch * 10 + step / args.eval_step)
+                                            epoch * 10 + step / args.eval_step, args, value_lookup, slot_value_pos)
                 if last_update is None or best_loss > eval_res['loss']:
                     best_loss = eval_res['loss']
                     save_path = os.path.join(args.save_dir, 'model_best_loss.bin')
@@ -205,15 +215,16 @@ def main(args):
                     (step, eval_res['loss'], eval_res['joint_acc'], eval_res['joint_turn_acc'], best_loss, best_acc))
 
             if epoch > args.n_epochs / 2 and step > 0 and step % args.eval_step == 0:
-                eval_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, \
-                                            label_list, epoch * 10 + step / args.eval_step)
+                eval_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
+                                            epoch * 10 + step / args.eval_step, args, value_lookup, slot_value_pos, is_dev=False)
 
                 logger.info(
                     "*** Step=%d, Tes Loss=%.6f, Tes Acc=%.6f, Tes Turn Acc=%.6f, Best Loss=%.6f, Best Acc=%.6f ***" % \
                     (step, eval_res['loss'], eval_res['joint_acc'], eval_res['joint_turn_acc'], best_loss, best_acc))
 
         if (epoch + 1) % args.eval_epoch == 0:
-            eval_res = model_evaluation(model, dev_data_raw, tokenizer, slot_meta, label_list, epoch + 1)
+            eval_res = model_evaluation(model, dev_data_raw, tokenizer, slot_meta, label_list, epoch + 1,
+                                        args, value_lookup, slot_value_pos)
             if last_update is None or best_loss > eval_res['loss']:
                 best_loss = eval_res['loss']
                 save_path = os.path.join(args.save_dir, 'model_best_loss.bin')
@@ -234,7 +245,8 @@ def main(args):
                 best_acc))
 
         if (epoch + 1) % args.eval_epoch == 0:
-            eval_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list, epoch + 1)
+            eval_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list, epoch + 1,
+                                        args, value_lookup, slot_value_pos, is_dev=False)
 
             logger.info(
                 "*** Epoch=%d, Last Update=%d, Tes Loss=%.6f, Tes Acc=%.6f, Tes Turn Acc=%.6f, Best Loss=%.6f, Best Acc=%.6f ***" % (
@@ -248,25 +260,25 @@ def main(args):
     print("Test using best loss model...")
     best_epoch = 0
     ckpt_path = os.path.join(args.save_dir, 'model_best_loss.bin')
-    model = BeliefTracker(args, slot_lookup, value_lookup, num_labels, slot_value_pos, device)
+    model = BeliefTracker(args, slot_lookup, device)
     ckpt = torch.load(ckpt_path, map_location='cpu')
     model.load_state_dict(ckpt)
     model.to(device)
 
     test_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
-                                best_epoch, is_gt_p_state=False)
+                                best_epoch, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=False)
     logger.info("Results based on best loss: ")
     logger.info(test_res)
     # ----------------------------------------------------------------------
     print("Test using best acc model...")
     ckpt_path = os.path.join(args.save_dir, 'model_best_acc.bin')
-    model = BeliefTracker(args, slot_lookup, value_lookup, num_labels, slot_value_pos, device)
+    model = BeliefTracker(args, slot_lookup, device)
     ckpt = torch.load(ckpt_path, map_location='cpu')
     model.load_state_dict(ckpt)
     model.to(device)
 
     test_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
-                                best_epoch + 1, is_gt_p_state=False)
+                                best_epoch + 1, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=False)
     logger.info("Results based on best acc: ")
     logger.info(test_res)
 

@@ -3,10 +3,18 @@ import numpy as np
 import json
 import time
 import os
+from tqdm import tqdm
 from copy import deepcopy
 
+from models.ModelBERT import UtteranceEncoding
+from utils.label_lookup import get_label_lookup_from_first_token, combine_slot_values
+from transformers import BertTokenizer
+from utils.label_lookup import get_label_ids
 
-def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, is_gt_p_state=False):
+def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch,
+                     args, value_lookup, slot_value_pos,
+                     is_gt_p_state=False, is_dev=True):
+
     model.eval()
 
     final_count = 0
@@ -23,7 +31,7 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
     results = {}
     last_dialogue_state = {}
     wall_times = []
-    for di, i in enumerate(test_data):
+    for di, i in enumerate(tqdm(test_data)):
         if i.turn_id == 0 or is_gt_p_state:
             last_dialogue_state = deepcopy(i.gold_last_state)
 
@@ -33,7 +41,15 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
         input_ids = torch.LongTensor([i.input_id]).to(model.device)
         input_mask = torch.LongTensor([i.input_mask]).to(model.device)
         segment_ids = torch.LongTensor([i.segment_id]).to(model.device)
-        label_ids = torch.LongTensor([i.label_ids]).to(model.device)
+
+        if is_dev:
+            label_ids = torch.LongTensor([i.label_ids]).to(model.device)
+        else: #test
+            label_ids = torch.LongTensor([i.candidate_label_ids]).to(model.device)
+            label_list = i.candidate_label_list
+            #print("^^^^")
+            #print(i.candidate_label_ids)
+            #print(label_list)
 
         input_ids_state = torch.LongTensor([i.input_id_state]).to(model.device)
         input_mask_state = torch.LongTensor([i.input_mask_state]).to(model.device)
@@ -47,26 +63,60 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
         #print(input_ids.size(1))
         #print(input_token_turn_list.shape[0])
         #print()
+        '''
         if input_ids.size(1) != input_token_turn_list.shape[0]:
             f = open('dev_test_bug.txt',mode='a+')
             f.write("dialogue_id:"+str(i.dialogue_id)+"  turn_id:"+str(i.turn_id)+'\n')
             f.close()
             continue
+        '''
 
+        num_labels = [len(labels) for labels in label_list]
+
+        if not is_dev:
+            #sv_encoder = UtteranceEncoding.from_pretrained(args.pretrained_model)
+            new_label_list, slot_value_pos = combine_slot_values(slot_meta, label_list)  # without slot head
+            #value_lookup = get_label_lookup_from_first_token(new_label_list, tokenizer, sv_encoder, model.device)
+            _label_ids, _label_lens = get_label_ids(new_label_list,
+                                                    BertTokenizer.from_pretrained(args.pretrained_model))
+            _label_ids = _label_ids.to(model.device)
+            _label_type_ids = torch.zeros(_label_ids.size(), dtype=torch.long).to(model.device)
+            _label_mask = (_label_ids > 0).to(model.device)
 
         start = time.perf_counter()
         with torch.no_grad():
-            t_loss, _, t_acc, t_acc_slot, t_pred_slot = model(input_ids=input_ids,
-                                                              attention_mask=input_mask,
-                                                              token_type_ids=segment_ids,
-                                                              input_ids_state = input_ids_state,
-                                                              input_mask_state = input_mask_state,
-                                                              segment_ids_state = segment_ids_state,
-                                                              labels=label_ids,
-                                                              input_token_turn_list=input_token_turn_list,
-                                                              history_type_turn_id_list=history_type_turn_id_list,
-                                                              slot_type=slot_type,
-                                                              eval_type="test")
+            if is_dev:
+                t_loss, _, t_acc, t_acc_slot, t_pred_slot = model(input_ids=input_ids,
+                                                                  attention_mask=input_mask,
+                                                                  token_type_ids=segment_ids,
+                                                                  input_ids_state=input_ids_state,
+                                                                  input_mask_state=input_mask_state,
+                                                                  segment_ids_state=segment_ids_state,
+                                                                  labels=label_ids,
+                                                                  input_token_turn_list=input_token_turn_list,
+                                                                  history_type_turn_id_list=history_type_turn_id_list,
+                                                                  slot_type=slot_type,
+                                                                  num_labels=num_labels,
+                                                                  slot_value_pos=slot_value_pos,
+                                                                  value_lookup=value_lookup,
+                                                                  eval_type="dev")
+            else:
+                t_loss, _, t_acc, t_acc_slot, t_pred_slot = model(input_ids=input_ids,
+                                                                  attention_mask=input_mask,
+                                                                  token_type_ids=segment_ids,
+                                                                  input_ids_state = input_ids_state,
+                                                                  input_mask_state = input_mask_state,
+                                                                  segment_ids_state = segment_ids_state,
+                                                                  labels=label_ids,
+                                                                  input_token_turn_list=input_token_turn_list,
+                                                                  history_type_turn_id_list=history_type_turn_id_list,
+                                                                  slot_type=slot_type,
+                                                                  num_labels=num_labels,
+                                                                  slot_value_pos=slot_value_pos,
+                                                                  _label_ids=_label_ids,
+                                                                  _label_type_ids=_label_type_ids,
+                                                                  _label_mask=_label_mask,
+                                                                  eval_type="test")
             loss += t_loss.item()
             joint_acc += t_acc
             slot_acc += t_acc_slot
@@ -85,7 +135,10 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch, 
             if v != last_dialogue_state[slot]:
                 t_turn_label.append(slot + "-" + v)
             last_dialogue_state[slot] = v
-            vv = label_list[s][i.label_ids[s]]
+            if is_dev:
+                vv = label_list[s][i.label_ids[s]]
+            else:
+                vv = label_list[s][i.candidate_label_ids[s]]
             if v == vv:
                 continue
             # only record wrong slots
