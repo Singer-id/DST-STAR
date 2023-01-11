@@ -10,6 +10,7 @@ import json
 import time
 import logging
 from tqdm import tqdm, trange
+from copy import deepcopy
 
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler
 from utils.data_utils import Processor, MultiWozDataset
@@ -20,9 +21,8 @@ from models.ModelBERT import BeliefTracker
 
 from transformers import BertTokenizer
 from transformers import AdamW, get_cosine_schedule_with_warmup, get_linear_schedule_with_warmup
-from transformers import logging as transformers_logging
 
-transformers_logging.set_verbosity_warning()
+
 # os.environ['CUDA_VISIBLE_DEVICES']='0'
 torch.cuda.set_device(0)
 
@@ -70,15 +70,16 @@ def main(args):
 
     label_list = processor.label_list
     num_labels = [len(labels) for labels in label_list]
-    #logger.info(slot_meta)
+
     tokenizer = BertTokenizer.from_pretrained(args.pretrained_model)
 
+    logger.info("***Loading Data***")
     train_data_raw = processor.get_train_instances(args.data_dir, tokenizer)
     print("# train examples %d" % len(train_data_raw))
-
+    logger.info("***")
     dev_data_raw = processor.get_dev_instances(args.data_dir, tokenizer)
     print("# dev examples %d" % len(dev_data_raw))
-
+    logger.info("***")
     test_data_raw = processor.get_test_instances(args.data_dir, tokenizer)
     print("# test examples %d" % len(test_data_raw))
     logger.info("Data loaded!")
@@ -113,7 +114,7 @@ def main(args):
     slot_lookup = get_label_lookup_from_first_token(slot_meta, tokenizer, sv_encoder, device) # 固定参数的bert
     value_lookup = get_label_lookup_from_first_token(new_label_list, tokenizer, sv_encoder, device)
 
-    model = BeliefTracker(args, slot_lookup, device)
+    model = BeliefTracker(args, slot_lookup, sv_encoder, device)
     model.to(device)
 
     ## prepare optimizer
@@ -255,12 +256,12 @@ def main(args):
 
         if last_update + args.patience <= epoch:
             break
-    
+
 
     print("Test using best loss model...")
     best_epoch = 0
     ckpt_path = os.path.join(args.save_dir, 'model_best_loss.bin')
-    model = BeliefTracker(args, slot_lookup, device)
+    model = BeliefTracker(args, slot_lookup, sv_encoder, device)
     ckpt = torch.load(ckpt_path, map_location='cpu')
     model.load_state_dict(ckpt)
     model.to(device)
@@ -272,7 +273,7 @@ def main(args):
     # ----------------------------------------------------------------------
     print("Test using best acc model...")
     ckpt_path = os.path.join(args.save_dir, 'model_best_acc.bin')
-    model = BeliefTracker(args, slot_lookup, device)
+    model = BeliefTracker(args, slot_lookup, sv_encoder, device)
     ckpt = torch.load(ckpt_path, map_location='cpu')
     model.load_state_dict(ckpt)
     model.to(device)

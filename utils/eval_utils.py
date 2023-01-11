@@ -6,14 +6,17 @@ import os
 from tqdm import tqdm
 from copy import deepcopy
 
-from models.ModelBERT import UtteranceEncoding
-from utils.label_lookup import get_label_lookup_from_first_token, combine_slot_values
-from transformers import BertTokenizer
-from utils.label_lookup import get_label_ids
+from utils.label_lookup import get_label_ids, combine_slot_values
+
 
 def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch,
                      args, value_lookup, slot_value_pos,
                      is_gt_p_state=False, is_dev=True):
+    """
+    label_list:test时使用i.candidate_label_list
+    value_lookup:dev时用参数value_lookup，test时用_label_ids, _label_type_ids, _label_mask传参数进模型计算value_lookup
+    slot_value_pos:test时使用i.slot_value_pos
+    """
 
     model.eval()
 
@@ -42,14 +45,13 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch,
         input_mask = torch.LongTensor([i.input_mask]).to(model.device)
         segment_ids = torch.LongTensor([i.segment_id]).to(model.device)
 
-        if is_dev:
-            label_ids = torch.LongTensor([i.label_ids]).to(model.device)
-        else: #test
-            label_ids = torch.LongTensor([i.candidate_label_ids]).to(model.device)
-            label_list = i.candidate_label_list
-            #print("^^^^")
-            #print(i.candidate_label_ids)
-            #print(label_list)
+        #if is_dev:
+            #label_ids = torch.LongTensor([i.label_ids]).to(model.device)
+        #else: #test
+            #label_ids = torch.LongTensor([i.candidate_label_ids]).to(model.device)
+            #label_list = i.candidate_label_list
+            #slot_value_pos = i.slot_value_pos
+        label_ids = torch.LongTensor([i.label_ids]).to(model.device)
 
         input_ids_state = torch.LongTensor([i.input_id_state]).to(model.device)
         input_mask_state = torch.LongTensor([i.input_mask_state]).to(model.device)
@@ -58,27 +60,13 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch,
         input_token_turn_list = np.array(i.input_token_turn_id)
         history_type_turn_id_list = i.history_type_turn_id
 
-        #print("_______input_ids__________")
-        #print(i.input_id)
-        #print(input_ids.size(1))
-        #print(input_token_turn_list.shape[0])
-        #print()
-        '''
-        if input_ids.size(1) != input_token_turn_list.shape[0]:
-            f = open('dev_test_bug.txt',mode='a+')
-            f.write("dialogue_id:"+str(i.dialogue_id)+"  turn_id:"+str(i.turn_id)+'\n')
-            f.close()
-            continue
-        '''
 
         num_labels = [len(labels) for labels in label_list]
 
         if not is_dev:
-            #sv_encoder = UtteranceEncoding.from_pretrained(args.pretrained_model)
-            new_label_list, slot_value_pos = combine_slot_values(slot_meta, label_list)  # without slot head
-            #value_lookup = get_label_lookup_from_first_token(new_label_list, tokenizer, sv_encoder, model.device)
-            _label_ids, _label_lens = get_label_ids(new_label_list,
-                                                    BertTokenizer.from_pretrained(args.pretrained_model))
+            #_label_ids = i._label_ids.to(model.device)
+            new_label_list, _ = combine_slot_values(slot_meta, label_list)
+            _label_ids, label_lens = get_label_ids(new_label_list, tokenizer)
             _label_ids = _label_ids.to(model.device)
             _label_type_ids = torch.zeros(_label_ids.size(), dtype=torch.long).to(model.device)
             _label_mask = (_label_ids > 0).to(model.device)

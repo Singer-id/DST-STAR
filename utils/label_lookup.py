@@ -1,6 +1,15 @@
 import torch
 import torch.nn as nn
-from .data_utils import slot_recovery
+
+def slot_recovery(slot):
+    if "pricerange" in slot:
+        return slot.replace("pricerange", "price range")
+    elif "arriveby" in slot:
+        return slot.replace("arriveby", "arrive by")
+    elif "leaveat" in slot:
+        return slot.replace("leaveat", "leave at")
+    else:
+        return slot
 
 
 def combine_slot_values(slot_meta, label_list, add_slot_head=False): # flatten
@@ -29,6 +38,10 @@ def get_label_ids(labels, tokenizer):
     max_len = 0
     for label in labels:
         label_token_ids = tokenizer(label)["input_ids"] # special tokens added automatically
+        # if label == "none":
+        #     print("___________")
+        #     print(label)
+        #     print(label_token_ids)
         label_len = len(label_token_ids)
         max_len = max(max_len, label_len)
   
@@ -40,6 +53,7 @@ def get_label_ids(labels, tokenizer):
         item_len = len(label_item_ids)
         padding = [0] * (max_len - item_len)
         label_ids_padded.append(label_item_ids + padding)
+
     label_ids_padded = torch.tensor(label_ids_padded, dtype=torch.long)
 
     return label_ids_padded, label_lens    
@@ -96,17 +110,3 @@ def get_label_lookup_from_first_token(labels, tokenizer, sv_encoder, device, use
     #label_lookup = nn.Embedding.from_pretrained(hid_label, freeze=True).to(device)
 
     return hid_label
-
-
-def get_label_lookup_from_first_token_2(new_label_list, tokenizer, sv_encoder, device):
-    # get label ids
-    label_ids, label_lens = get_label_ids(new_label_list, tokenizer)
-    label_type_ids = torch.zeros(label_ids.size(), dtype=torch.long)
-    label_mask = (label_ids > 0)
-    hid_label = sv_encoder(label_ids, label_mask, label_type_ids)[0]
-
-    hid_label = hid_label[:, 0, :]
-    hid_label = hid_label.detach()
-    label_lookup = nn.Embedding.from_pretrained(hid_label, freeze=True).to(device)
-
-    return label_lookup

@@ -5,9 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from copy import deepcopy
 from torch.nn import CrossEntropyLoss
-from transformers import BertPreTrainedModel, BertModel, BertTokenizer
+from transformers import BertPreTrainedModel, BertModel
 from sympy import *
-from utils.label_lookup import get_label_ids
+
 
 class UtteranceEncoding(BertPreTrainedModel):
     def __init__(self, config):
@@ -459,8 +459,6 @@ class Decoder(nn.Module):
 
         batch_size = hidden.size(0)
         #value_emb = value_lookup.weight[0:num_total_labels, :]
-        #print("^^^^^^^")
-        #print(value_emb.size())
 
         for s, slot_id in enumerate(target_slots):  # note: target_slots are successive
             hidden_label = value_lookup[slot_value_pos[slot_id][0]:slot_value_pos[slot_id][1], :]
@@ -470,15 +468,32 @@ class Decoder(nn.Module):
             _hidden = hidden[:, s, :].unsqueeze(1).repeat(1, num_slot_labels, 1).reshape(batch_size * num_slot_labels,
                                                                                          -1)
             _dist = self.metric(_hidden_label, _hidden).view(batch_size, num_slot_labels)
+            if s == 21:
+                print("______")
+                print("slot:"+str(s))
+                x = hidden_label[168] #168
+                print(hidden_label[168])
+
+            if s == 24:
+                print("______")
+                print("slot:"+str(s))
+                y = hidden_label[156] #156
+                print(hidden_label[156])
+                print(x == y)
+
+            #print("_____dist______")
+            #print(_dist)
 
             if self.distance_metric == "euclidean":
                 _dist = -_dist
 
             _, pred = torch.max(_dist, -1)
+
+            #print(pred)
             pred_slot.append(pred.view(batch_size, 1))
 
             _loss = self.nll(_dist, labels[:, s])
-            #print("^^^^^^")
+
             #print(pred)
             #print(labels[:, s])
 
@@ -529,17 +544,12 @@ class Decoder(nn.Module):
 
 
 class BeliefTracker(nn.Module):
-    def __init__(self, args, slot_lookup, device):
+    def __init__(self, args, slot_lookup, sv_encoder, device):
         super(BeliefTracker, self).__init__()
-
-        #self.num_slots = len(num_labels)
-        #self.num_labels = num_labels
-        #self.slot_value_pos = slot_value_pos
         self.args = args
         self.device = device
         self.slot_lookup = slot_lookup
-        #self.value_lookup = value_lookup
-
+        self.sv_encoder = sv_encoder
         self.encoder = UtteranceEncoding.from_pretrained(self.args.pretrained_model)
         self.model_output_dim = self.encoder.config.hidden_size
         self.decoder = Decoder(args, self.model_output_dim, device)
@@ -557,14 +567,10 @@ class BeliefTracker(nn.Module):
 
         state_output = self.encoder(input_ids_state, input_mask_state, segment_ids_state)[0]
         state_output = state_output.detach()
-        #TODO 梯度到底有没有，查看warning？
 
         if eval_type == "test": #有new_label_list，没有value_lookup
-            # _label_ids, _label_lens = get_label_ids(new_label_list, BertTokenizer.from_pretrained(self.args.pretrained_model))
-            # _label_ids = _label_ids.to(self.device)
-            # _label_type_ids = torch.zeros(_label_ids.size(), dtype=torch.long).to(self.device)
-            # _label_mask = (_label_ids > 0).to(self.device)
-            value_lookup = self.encoder(_label_ids, _label_mask, _label_type_ids)[1].detach()
+            self.sv_encoder.eval()
+            value_lookup = self.sv_encoder(_label_ids, _label_mask, _label_type_ids)[0][:, 0, :].detach()
             #value_lookup = nn.Embedding.from_pretrained(hid_label, freeze=True)
 
         # decoder

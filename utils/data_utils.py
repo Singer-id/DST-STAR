@@ -7,6 +7,7 @@ import random
 import re
 import os
 from copy import deepcopy
+from utils.label_lookup import combine_slot_values, get_label_ids
 
 def slot_recovery(slot):
     if "pricerange" in slot:
@@ -70,10 +71,10 @@ class Processor(object):
         return self._create_instances(self._read_tsv(os.path.join(data_dir, "train.tsv")), tokenizer)
 
     def get_dev_instances(self, data_dir, tokenizer):
-        return self._create_instances(self._read_tsv(os.path.join(data_dir, "dev.tsv")), tokenizer)
+        return self._create_instances(self._read_tsv(os.path.join(data_dir, "train.tsv")), tokenizer)
 
     def get_test_instances(self, data_dir, tokenizer):
-        return self._create_instances(self._read_tsv(os.path.join(data_dir, "test.tsv")), tokenizer)
+        return self._create_instances(self._read_tsv(os.path.join(data_dir, "train.tsv")), tokenizer)
 
     def get_candidate_label_map(self, candidate_dict):
         label_list = []
@@ -89,7 +90,7 @@ class Processor(object):
         history_uttr = []
 
         #lines = lines[9074:9094]
-        for (i, line) in enumerate(lines[0:1000]):
+        for (i, line) in enumerate(lines[0:10]):
             dialogue_idx = line[0]
             turn_idx = int(line[1])
             is_last_turn = (line[2] == "True")
@@ -142,26 +143,14 @@ class Processor(object):
                     if value not in candidate_dict[value_type]:
                         candidate_dict[value_type].append(value)
 
-            #print("---&&&&&---")
-            #print(candidate_dict)
             #构造对应于本轮候选值集合的label_id
             candidate_label_map, candidate_label_list = self.get_candidate_label_map(candidate_dict)
-            #print(candidate_label_map)
-            #print(candidate_label_list)
             for idx in self.slot_idx:
-                #print("dialogue_idx:"+str(dialogue_idx))
-                #print("turn_idx:"+str(turn_idx))
-                #print("slot_idx:"+str(idx))
-                #x = candidate_label_map[idx]
-                #print(x)
-                #y = line[5+idx]
-                #print(y)
-                #print(x==y)
-                #print(type(x))
-                #print(type(y))
-                #print(candidate_label_map[idx][line[5+idx]])
                 candidate_label_ids.append(candidate_label_map[idx][line[5+idx]]) #新候选值集合对于的label_id
-            #print(turn_dialogue_state)
+
+            #print("________")
+            #print(self.slot_type)
+            #print(candidate_label_list)
             #print(candidate_label_ids)
 
             history_uttr.append(last_uttr)
@@ -216,6 +205,8 @@ class Processor(object):
             # we keep the order
             #drop_mask = [0] + [1] * diag_2_length + [0] + [1] * diag_1_length + [0]  # word dropout
             #TODO drop_mask
+
+            #更新diag_2和diag_1
             diag_2 = ["[CLS]"] + diag_2 + ["[SEP]"]
             diag_1 = diag_1 + ["[SEP]"]
             diag = diag_2 + diag_1
@@ -235,15 +226,14 @@ class Processor(object):
             segment_id_state = [0] * len(state)
             input_mask_state = [1] * len(state)
 
+            #候选值集合的mask
+            new_label_list, slot_value_pos = combine_slot_values(self.slot_meta, candidate_label_list)
+            _label_ids, _label_lens = get_label_ids(new_label_list, tokenizer)
 
-            '''
-            if len(self.input_id) != len(input_token_turn_list):
-                file = open('train_bug.txt', mode='a+')
-                file.write("dialogue_id:" + str(dialogue_idx) + "  turn_id:" + str(turn_idx) + '\n')
-                file.close()
-                continue
-            '''
+
             # ID, turn_id, turn_utter, dialogue_history, label_ids,
+            # candidate_label_ids, candidate_label_list,
+            # _label_ids, _label_lens, slot_value_pos,
             # turn_label, curr_turn_state, last_turn_state,
             # history_type_turn_id, input_token_turn_id,
             # input_id, segment_id, input_mask, input_id_state, segment_id_state, input_mask_state,
@@ -251,6 +241,7 @@ class Processor(object):
 
             instance = TrainingInstance(dialogue_idx, turn_idx, text_a, text_b, turn_dialogue_state_ids,
                                         candidate_label_ids, candidate_label_list,
+                                        _label_ids, _label_lens, slot_value_pos,
                                         turn_only_label, turn_dialogue_state, last_dialogue_state,
                                         history_type_turn_id, input_token_turn_id,
                                         input_id, segment_id, input_mask, input_id_state, segment_id_state, input_mask_state,
@@ -259,24 +250,13 @@ class Processor(object):
             last_dialogue_state = turn_dialogue_state
             history_token_turn_id += token_turn_id
 
-            #print("——————————————")
-            #print(diag_1)
-            #print(token_turn_id)
-            #print(diag_2)
-            #print(history_token_turn_id)
-            #print(dialogue_idx)
-            #print(diag)
-            #print(input_token_turn_id)
-            #print("^^^^")
-            #print(len(diag))
-            #print(len(input_token_turn_id))
-
         return instances
             
 
 class TrainingInstance(object):
     def __init__(self, ID, turn_id, turn_utter, dialogue_history, label_ids,
                  candidate_label_ids, candidate_label_list,
+                 _label_ids, _label_lens, slot_value_pos,
                  turn_label, curr_turn_state, last_turn_state,
                  history_type_turn_id, input_token_turn_id,
                  input_id, segment_id, input_mask, input_id_state, segment_id_state, input_mask_state,
@@ -296,6 +276,9 @@ class TrainingInstance(object):
 
         self.candidate_label_ids = candidate_label_ids #真实候选值id（对应于candidate_label_list
         self.candidate_label_list = candidate_label_list #当轮候选值集合拼成的列表
+        self._label_ids = _label_ids
+        self._label_lens = _label_lens
+        self.slot_value_pos = slot_value_pos
 
         self.history_type_turn_id = history_type_turn_id
         self.input_token_turn_id = input_token_turn_id
