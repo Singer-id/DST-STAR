@@ -45,13 +45,13 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch,
         input_mask = torch.LongTensor([i.input_mask]).to(model.device)
         segment_ids = torch.LongTensor([i.segment_id]).to(model.device)
 
-        #if is_dev:
-            #label_ids = torch.LongTensor([i.label_ids]).to(model.device)
-        #else: #test
-            #label_ids = torch.LongTensor([i.candidate_label_ids]).to(model.device)
-            #label_list = i.candidate_label_list
-            #slot_value_pos = i.slot_value_pos
-        label_ids = torch.LongTensor([i.label_ids]).to(model.device)
+        if is_dev:
+            label_ids = torch.LongTensor([i.label_ids]).to(model.device)
+        else: #test
+            label_ids = torch.LongTensor([i.candidate_label_ids]).to(model.device)
+            label_list = i.candidate_label_list
+            slot_value_pos = i.slot_value_pos
+        #label_ids = torch.LongTensor([i.label_ids]).to(model.device) #调试用
 
         input_ids_state = torch.LongTensor([i.input_id_state]).to(model.device)
         input_mask_state = torch.LongTensor([i.input_mask_state]).to(model.device)
@@ -64,10 +64,13 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch,
         num_labels = [len(labels) for labels in label_list]
 
         if not is_dev:
-            #_label_ids = i._label_ids.to(model.device)
+            _label_ids = i._label_ids.to(model.device)
+            '''
+            #调试用
             new_label_list, _ = combine_slot_values(slot_meta, label_list)
             _label_ids, label_lens = get_label_ids(new_label_list, tokenizer)
             _label_ids = _label_ids.to(model.device)
+            '''
             _label_type_ids = torch.zeros(_label_ids.size(), dtype=torch.long).to(model.device)
             _label_mask = (_label_ids > 0).to(model.device)
 

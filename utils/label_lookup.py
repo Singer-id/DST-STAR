@@ -92,7 +92,7 @@ def get_label_lookup(labels, tokenizer, sv_encoder, device, use_layernorm=True):
 def get_label_lookup_from_first_token(labels, tokenizer, sv_encoder, device, use_layernorm=False):
     model_output_dim = sv_encoder.config.hidden_size
 
-    sv_encoder.eval() 
+    #sv_encoder.eval()
     LN = nn.LayerNorm(model_output_dim, elementwise_affine=False)
     
     # get label ids

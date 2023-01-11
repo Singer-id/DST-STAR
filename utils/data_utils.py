@@ -71,10 +71,10 @@ class Processor(object):
         return self._create_instances(self._read_tsv(os.path.join(data_dir, "train.tsv")), tokenizer)
 
     def get_dev_instances(self, data_dir, tokenizer):
-        return self._create_instances(self._read_tsv(os.path.join(data_dir, "train.tsv")), tokenizer)
+        return self._create_instances(self._read_tsv(os.path.join(data_dir, "dev.tsv")), tokenizer)
 
     def get_test_instances(self, data_dir, tokenizer):
-        return self._create_instances(self._read_tsv(os.path.join(data_dir, "train.tsv")), tokenizer)
+        return self._create_instances(self._read_tsv(os.path.join(data_dir, "test.tsv")), tokenizer)
 
     def get_candidate_label_map(self, candidate_dict):
         label_list = []
@@ -90,7 +90,7 @@ class Processor(object):
         history_uttr = []
 
         #lines = lines[9074:9094]
-        for (i, line) in enumerate(lines[0:10]):
+        for (i, line) in enumerate(lines):
             dialogue_idx = line[0]
             turn_idx = int(line[1])
             is_last_turn = (line[2] == "True")

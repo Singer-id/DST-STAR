@@ -110,6 +110,7 @@ def main(args):
     for p in sv_encoder.bert.parameters():
         p.requires_grad = False
 
+    sv_encoder.eval()
     new_label_list, slot_value_pos = combine_slot_values(slot_meta, label_list)  # without slot head
     slot_lookup = get_label_lookup_from_first_token(slot_meta, tokenizer, sv_encoder, device) # 固定参数的bert
     value_lookup = get_label_lookup_from_first_token(new_label_list, tokenizer, sv_encoder, device)

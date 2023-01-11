@@ -468,6 +468,9 @@ class Decoder(nn.Module):
             _hidden = hidden[:, s, :].unsqueeze(1).repeat(1, num_slot_labels, 1).reshape(batch_size * num_slot_labels,
                                                                                          -1)
             _dist = self.metric(_hidden_label, _hidden).view(batch_size, num_slot_labels)
+
+            '''
+            #调试用
             if s == 21:
                 print("______")
                 print("slot:"+str(s))
@@ -480,22 +483,22 @@ class Decoder(nn.Module):
                 y = hidden_label[156] #156
                 print(hidden_label[156])
                 print(x == y)
-
-            #print("_____dist______")
-            #print(_dist)
+            '''
+            # print("_____dist______")
+            # print("slot:" + str(s))
+            # print(_dist)
 
             if self.distance_metric == "euclidean":
                 _dist = -_dist
 
             _, pred = torch.max(_dist, -1)
 
-            #print(pred)
             pred_slot.append(pred.view(batch_size, 1))
 
             _loss = self.nll(_dist, labels[:, s])
 
-            #print(pred)
-            #print(labels[:, s])
+            # print(pred)
+            # print(labels[:, s])
 
             loss += _loss
             loss_slot.append(_loss.item())
@@ -569,7 +572,6 @@ class BeliefTracker(nn.Module):
         state_output = state_output.detach()
 
         if eval_type == "test": #有new_label_list，没有value_lookup
-            self.sv_encoder.eval()
             value_lookup = self.sv_encoder(_label_ids, _label_mask, _label_type_ids)[0][:, 0, :].detach()
             #value_lookup = nn.Embedding.from_pretrained(hid_label, freeze=True)
 
