@@ -180,9 +180,6 @@ def getDialogueAct(filename, data, data2, idx, idx_acts):
 
     if not isinstance(turn, str): # and not isinstance(turn, unicode):
         for k in turn.keys():
-            # temp = [k.split('-')[0].lower(), k.split('-')[1].lower()]
-            # for a in turn[k]:
-            #     acts.append(temp + [a[0].lower()])
 
             if k.split('-')[1].lower() == 'request':
                 for a in turn[k]:
@@ -332,7 +329,7 @@ def loadData(args):
 
 def getDomain(idx, log, domains, last_domain):
     if idx == 1:
-        active_domains = get_summary_bstate(log[idx]["metadata"], True) 
+        active_domains = get_summary_bstate(log[idx]["metadata"], True)
         crnt_doms = active_domains[0] if len(active_domains)!=0 else domains[0]
         return crnt_doms
     else:
@@ -400,7 +397,7 @@ def createData(args):
 
             # FIXING delexicalization:
             dialogue = fixDelex(dialogue_name, dialogue, data2, idx, idx_acts)
-        
+
         delex_data[dialogue_name] = dialogue
 
         # if didx > 10:
@@ -449,13 +446,13 @@ def divideData(data,args):
     test_dials = []
     val_dials = []
     train_dials = []
-        
+
     # dictionaries
     word_freqs_usr = OrderedDict()
     word_freqs_sys = OrderedDict()
 
     count_train, count_val, count_test = 0, 0, 0
-    
+
     for dialogue_name in data:
         # print dialogue_name
         dial_item = data[dialogue_name]

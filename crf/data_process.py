@@ -9,10 +9,12 @@ import os
 import random
 from functools import partial
 from utils.fix_label import fix_general_label_error
+from utils.bio_matching import value_matching
 from collections import OrderedDict
 from Model_crf import *
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 EXPERIMENT_DOMAINS = ["hotel", "train", "restaurant", "attraction", "taxi"]
+import datetime
 
 random.seed(577)
 HISTORY_MAX_LEN = 450
@@ -262,8 +264,9 @@ def json_read(path):
     return row_data
 def data_process(args, path_name, SLOTS, tokenizer, description,slot_info,ontology, dataset=None,tagging=False):
     slot_lang_list = ["description_human", "rule_description", "value_description", "rule2", "rule3"]
+    value_map_dict={}
     if tagging:
-        model_path='model/Slot_model/assistant_Slot_Trained_model_bert_classifier_128_5e-05'
+        model_path='model/Slot_model/assistant_Slot_Trained_model_bert_classifier_128_0.0001'
         # config=BertConfig.from_pretrained(os.path.join(model_path,'config.json'))
         id2label=json_read(os.path.join(model_path,'config.json'))['id2label']
         crf_model= BertSlotFilling.from_pretrained(model_path)
@@ -273,7 +276,7 @@ def data_process(args, path_name, SLOTS, tokenizer, description,slot_info,ontolo
         # transformers_model.bert = BertModel.from_pretrained("bert-base-uncased")
         # crf_model = BertSlotFilling(transformers_model, {i: label for i, label in enumerate(id2label.values())})
         # crf_model.load_state_dict(torch.load(os.path.join(model_path, 'pytorch_model.bin')), strict=False)
-    co_reference_dict={}
+    
     print(("Reading all files from {}".format(path_name)))
     data = []
     domain_counter = {}
@@ -338,6 +341,7 @@ def data_process(args, path_name, SLOTS, tokenizer, description,slot_info,ontolo
             candiate_dict={}
             turn_list=[]
             for ti, turn in turns:
+                # starttime = datetime.datetime.now()
                 turn_fix={}
                 turn_id = ti
 
@@ -386,6 +390,8 @@ def data_process(args, path_name, SLOTS, tokenizer, description,slot_info,ontolo
 
                     if ti==0:
                         input_pre_turn_state=init_input_state
+                        preturn_type={}
+                        preturn_candiate={}
                         # print(init_input_state)
                     else:
                         # input_pre_turn_state=input_pre_turn_state_process(input_pre_turn_state,pre_turn_state)
@@ -414,7 +420,8 @@ def data_process(args, path_name, SLOTS, tokenizer, description,slot_info,ontolo
                                     if value in ['none','no','dontcare','yes']:
                                         continue
                                 #  if value in turn_dialogue.split():
-                                    if value_matching(value,turn_dialogue.split(),dial_dict):
+                                    matching_result=value_matching(value, turn_dialogue.split())
+                                    if matching_result['matching_result']:
                                     #    print('value',value,turn_dialogue.split())
                             # if final_state[slot] in turn_dialogue:
                                 # print(slot,final_state[slot],description[slot]['value_type'])
@@ -426,40 +433,60 @@ def data_process(args, path_name, SLOTS, tokenizer, description,slot_info,ontolo
 
                                             candiate_dict[description[slot]['value_type']].append(value)
                                         # if value_type!='bool':
-                                        BIO_INIT=BIO_tagging(BIO_INIT,turn_dialogue,value,value_type,tokenizer)
+                                        if matching_result['matching_value'] not in value_map_dict:
+                                            value_map_dict[matching_result['matching_value']]=value
+                                        BIO_INIT=BIO_tagging(BIO_INIT,turn_dialogue,matching_result['matching_value'],value_type)
 
                         for slot in slot_list:
                             slot_operation_dict[slot]=slot_operation(slot,{},slot_values,state_dict) if ti==0 else slot_operation(slot,pre_turn_state,slot_values,state_dict)
 
                         BIO_STR=list_to_str(BIO_INIT)
-                        turn['input'] = turn_dialogue
-                        turn["BIO_TAGGING"] = BIO_STR
-                        turn['operation'] = slot_operation_dict.copy()
-                        turn['dialog_history'] = dialog_history.copy()
-                        turn['history_slot_type'] = value_type_process(history_slot_type.copy())
-                        turn['input_pre_turn_state'] = input_pre_turn_state.copy()
-                        turn['candiate_dict'] = turn_label_check(turn['turn_label'], candiate_dict.copy(), description)
-                        turn['turn_label'] = turn_label_process(turn['turn_label'])
-                        turn['turn_id'] = dial_dict['dialogue_idx']
-                        turn['domains'] = dial_dict['domains']
-                        turn['input_history'] = history_concat(turn["dialog_history"], tokenizer)
-                        turn['att_pre_turn_state'] = att_pre_turn_state_process(turn["input_pre_turn_state"], SLOTS)
-                        # turn['star_history'],turn['star_utter']=star_input_data(turn['dialog_history'],turn['input_pre_turn_state'])
-                        turn_fix["system_transcript"] = turn["system_transcript"]
-                        turn_fix["turn_idx"] = turn["turn_idx"]
-                        turn_fix["turn_label"] = turn["turn_label"]
-                        turn_fix["transcript"] = turn["transcript"]
-                        turn_fix["domain"] = turn["domain"]
-                        turn_fix["operation"] = turn["operation"]
-                        turn_fix["dialog_history"] = turn["dialog_history"]
-                        turn_fix["history_slot_type"] = turn["history_slot_type"]
-                        turn_fix["input_pre_turn_state"] = turn["input_pre_turn_state"]
-                        turn_fix["candiate_dict"] = turn["candiate_dict"]
-                        turn_fix["turn_id"] = turn["turn_id"]
-                        turn_fix['input_history'] = history_concat(turn["dialog_history"], tokenizer)
-                        turn_fix['att_pre_turn_state'] = att_pre_turn_state_process(turn["input_pre_turn_state"], SLOTS)
+                        if args['make_tagging_label']:
+
+
+
+                            turn['input'] = turn_dialogue
+                            turn["BIO_TAGGING"] = BIO_STR
+                            # endtime = datetime.datetime.now()
+                            # print('timemiddle', (endtime - starttime))
+
+                        else:
+                            turn['input'] = turn_dialogue
+                            turn["BIO_TAGGING"] = BIO_STR
+                            turn['input'] = turn_dialogue
+                            turn["BIO_TAGGING"] = BIO_STR
+                            turn['operation'] = slot_operation_dict.copy()
+                            turn['dialog_history'] = dialog_history.copy()
+                            turn['history_slot_type'] = value_type_process(history_slot_type.copy())
+                            turn['input_pre_turn_state'] = input_pre_turn_state.copy()
+                            turn['candiate_dict'] = turn_label_check(turn['turn_label'], candiate_dict.copy(), description)
+                            turn['turn_label'] = turn_label_process(turn['turn_label'])
+                            turn['turn_id'] = dial_dict['dialogue_idx']
+                            turn['domains'] = dial_dict['domains']
+                            turn['input_history'] = history_concat(turn["dialog_history"], tokenizer)
+                            turn['att_pre_turn_state'] = att_pre_turn_state_process(turn["input_pre_turn_state"], SLOTS)
+                            # turn['star_history'],turn['star_utter']=star_input_data(turn['dialog_history'],turn['input_pre_turn_state'])
+                            turn_fix["system_transcript"] = turn["system_transcript"]
+                            turn_fix["turn_idx"] = turn["turn_idx"]
+                            turn_fix["turn_label"] = turn["turn_label"]
+                            turn_fix["transcript"] = turn["transcript"]
+                            turn_fix["domain"] = turn["domain"]
+                            turn_fix["operation"] = turn["operation"]
+                            turn_fix["dialog_history"] = turn["dialog_history"]
+                            turn_fix["history_slot_type"] = turn["history_slot_type"]
+                            turn_fix["input_pre_turn_state"] = turn["input_pre_turn_state"]
+                            turn_fix["candiate_dict"] = turn["candiate_dict"]
+                            turn_fix["turn_id"] = turn["turn_id"]
+                            turn_fix['input_history'] = history_concat(turn["dialog_history"], tokenizer)
+                            turn_fix['att_pre_turn_state'] = att_pre_turn_state_process(turn["input_pre_turn_state"], SLOTS)
                     elif  dataset=='test' and tagging:
-                        BIO_STR=tagging_model(crf_model,turn_dialogue,crf_tokenizer,id2label)
+                        # print('hhh')
+                        BIO_result=tagging_model(crf_model,turn_dialogue,crf_tokenizer,id2label)
+                        print('BIO_result',BIO_result,turn_dialogue)
+                        turn['history_slot_type']=test_value_type_process(preturn_type,BIO_result,ti).copy()
+                        preturn_type=turn['history_slot_type']
+                        turn['candiate_dict']=test_value_can_process(preturn_candiate,BIO_result).copy()
+                        preturn_candiate= turn['candiate_dict']
 
                     turn_list.append(turn)
                     # pre_turn_list=turn_belief_list
@@ -473,10 +500,18 @@ def data_process(args, path_name, SLOTS, tokenizer, description,slot_info,ontolo
     #     print('history',['dialog_history'])
     #     print('input',detail['intput_text'])
     if args['use_2.4']:
+        if tagging:
+         with open(f'{dataset}_dlc_2.4_tagging.json', 'w') as f:
+            json.dump(dials_list, f,indent=4)
+        elif args['make_tagging_label']:
+            with open(f'{dataset}_dlc_2.4_tagging_label.json', 'w') as f:
+                json.dump(dials_list, f, indent=4)
+            with open(f'{dataset}_dlc_2.4_map_label.json', 'w') as f:
+                json.dump(value_map_dict, f, indent=4)
+        else:
          with open(f'{dataset}_dlc_2.4.json', 'w') as f:
             json.dump(dials_list, f,indent=4)
-         with open(f'{dataset}_co_reference_2.4.json', 'w') as f:
-            json.dump(co_reference_dict, f,indent=4)   
+
     # else:
     #     with open(f'{dataset}_dlc.json', 'w') as f:
     #        json.dump(dials, f,indent=4)
@@ -489,24 +524,83 @@ def data_process(args, path_name, SLOTS, tokenizer, description,slot_info,ontolo
         return_confusion_dict['leaveat_dict'] = leaveat_dict
         with open(f'{dataset}_confusion.json', 'w') as f:
            json.dump(return_confusion_dict, f,indent=4)
+def test_value_type_process(preturn_type,tagging,turn_id):
+
+    for key in tagging.keys():
+        if key not in preturn_type:
+            preturn_type[key]=[]
+        preturn_type[key].append(turn_id)
+    return    preturn_type
+def test_value_can_process(preturn_can,tagging):
+    for key in tagging.keys():
+        if key not in preturn_can:
+            preturn_can[key]=[]
+        for value in tagging[key]:
+            if value not in preturn_can[key]:
+                  preturn_can[key].append(value)
+    return preturn_can
 def tagging_model(model,turn_dialogue,tokenizer,id2label):
     model.eval()
     model.to(device)
     # input=tokenizer(turn_dialogue,pad_to_max_length=True,
     #                         return_tensors="pt", verbose=False, add_special_tokens=True)
-    input=tokenizer.batch_encode_plus(turn_dialogue,
-                                add_special_tokens=True,
-                                padding='longest',
-                                return_tensors="pt")
+    input= tokenizer(
+    turn_dialogue, add_special_tokens=True, return_tensors="pt")
     input_ids=input['input_ids']
     attention_mask=input["attention_mask"]
     token_type_ids=input["token_type_ids"]
     with torch.no_grad():
        predicted_tags = model(input_ids=input_ids.to(device), token_type_ids=token_type_ids.to(device),
                              attention_mask=attention_mask.to(device))
-       print('predicted_tags', turn_dialogue,predicted_tags)
+       # print('predicted_tags', turn_dialogue,predicted_tags,tokenizer.decode())
        result = [[id2label[str(data)] for data in datas] for datas in predicted_tags]
-       print('resut',result)
+       # print('tagging_resut',result)
+       tagging_result=value_extract(result[0],tokenizer.tokenize(turn_dialogue))
+       return tagging_result
+def value_extract(tagging,text):
+    result={}
+    # print('text',text)
+    for idx,token in enumerate(tagging):
+        if token!='O':
+            # print(token)
+            if token[0]=='B':
+                if token not in result:
+                    result[token[2:]]=[]
+                result[token[2:]].append([])
+                result[token[2:]][-1].append(text[idx])
+            elif token[0]=='I':
+                result[token[2:]][-1].append(text[idx])
+
+    result=tagging_result_check(result)
+    # print('result', result)
+    # for key in result.keys():
+    #     key_list=result[key]
+    #     for value in key_list:
+    #         print('ha',tokenizer.decode(value))
+    return result
+def tagging_result_check(tagging_result):
+        for key in tagging_result.keys():
+            key_list=tagging_result[key]
+            for idx,value in enumerate(key_list):
+                if key=='time':
+                    time=''
+                    for token in value:
+                        time+=token
+                    key_list[idx]=time
+                else:
+                    str = ''
+                    for token_idx,token in enumerate(value):
+                        if '##' in token:
+
+                               str+=token[2:]
+
+                        else:
+                            if  token_idx !=0:
+                                str += ' ' +token
+                            else:
+                                str += token
+                    key_list[idx]=str
+        return tagging_result
 def value_type_process(input_dict):
     result={}
     # print('input_dict',input_dict)
@@ -565,7 +659,7 @@ def list_to_str(input_list):
            if idx!=len(input_list)-1:
               result_str+=" "
     return result_str
-def BIO_tagging(BIO_INIT,dialogue,value,value_type,tokenizer):
+def BIO_tagging(BIO_INIT,dialogue,value,value_type):
     Init = 0
     # print('turn_dialogue',dialogue.split())
     # print('value',value)
@@ -577,7 +671,7 @@ def BIO_tagging(BIO_INIT,dialogue,value,value_type,tokenizer):
     value=tokenizer.tokenize(value)
     # print('value',value)
     # print('value',value)
-    dialogue=tokenizer.tokenize(dialogue)
+    # dialogue=tokenizer.tokenize(dialogue)
     turn_dialogue=enumerate(tokenizer_dialogue)
     for idx,token in turn_dialogue:
         if token==value[0]:
@@ -615,59 +709,66 @@ def slot_operation(slot,pre_turn_state,turn_state,state):
              else:
                     return 'dontcare'
 
-def co_reference_find(turn_slot_values,turn_dialogue,dial_dict):
-    match_num=0
-    result=[]
-    for slot in turn_slot_values:
-        slot_domain=slot[:slot.find('-')]
-        if slot_domain not in EXPERIMENT_DOMAINS:
-            continue
-        if slot=='hotel-parking' or slot=='hotel-internet':
-            continue
-        if turn_slot_values[slot] in ['none','dontcare']:
-             continue
-        # print(turn_slot_values[slot],turn_dialogue.split())
-        # if dial_dict['dial_id']=='PMUL1690.json':
-        #    print('PMUL1690.json')
-        #    if turn_slot_values[slot]=='monday':
-           
-        #      print('input_list',value_matching(turn_slot_values[slot],turn_dialogue.split(),dial_dict),turn_dialogue.split())
-        if not value_matching(turn_slot_values[slot],turn_dialogue.split(),dial_dict):
-           match_num+=1
-           result.append(slot)
-    
-    return  result
+# def co_reference_find(turn_slot_values,turn_dialogue,dial_dict):
+#     match_num=0
+#     result=[]
+#     for slot in turn_slot_values:
+#         slot_domain=slot[:slot.find('-')]
+#         if slot_domain not in EXPERIMENT_DOMAINS:
+#             continue
+#         if slot=='hotel-parking' or slot=='hotel-internet':
+#             continue
+#         if turn_slot_values[slot] in ['none','dontcare']:
+#              continue
+#         # print(turn_slot_values[slot],turn_dialogue.split())
+#         # if dial_dict['dial_id']=='PMUL1690.json':
+#         #    print('PMUL1690.json')
+#         #    if turn_slot_values[slot]=='monday':
+#
+#         #      print('input_list',value_matching(turn_slot_values[slot],turn_dialogue.split(),dial_dict),turn_dialogue.split())
+#         if not value_matching(turn_slot_values[slot],turn_dialogue.split(),dial_dict):
+#            match_num+=1
+#            result.append(slot)
+#
+#     return  result
 
 
 
-def value_matching(value,sentence_list,dial_dict):
-    value=value.split()
-    save_list=[]
-    input_list=enumerate(sentence_list)
-    work_step=0
-    # if dial_dict['dial_id']=='PMUL1690.json':
-    #     if value==['monday']:
-    #        print('input_list',sentence_list)
-    for idx, token in input_list:
-        if token==value[0]:
-            if len(value)==1:
-                return True
-            else:
-                for value_idx in range(len(value)-1):
-                    work_step+=1
-                    try:
-                        if sentence_list[idx+value_idx+1]!=value[value_idx+1]:
-                            break
-                    except:
-                         return False
-                    return True
-        for skip in range(work_step):
-            try:
-                next(input_list)
-            except:
-                    break
-        work_step=0
-    return False
+# def value_matching(value,sentence_list,dial_dict):
+#     value=value.split()
+#     save_list=[]
+#     input_list=enumerate(sentence_list)
+#     work_step=0
+#     # if dial_dict['dial_id']=='PMUL1690.json':
+#     #     if value==['monday']:
+#     #        print('input_list',sentence_list)
+#     for idx, token in input_list:
+#         if token==value[0]:
+#             if len(value)==1:
+#                 return True
+#             else:
+#                 for value_idx in range(len(value)-1):
+#                     work_step+=1
+#                     try:
+#                         if sentence_list[idx+value_idx+1]!=value[value_idx+1]:
+#                             break
+#                     except:
+#                          return False
+#                     return True
+#         for skip in range(work_step):
+#             try:
+#                 next(input_list)
+#             except:
+#                     break
+#         work_step=0
+#     return False
+# def value_map(value_list,context,context_idx):
+#     matching_num=0
+#     context=context[context_idx:len(value_list)+3]
+#     for token in context
+#     for value in value_list:
+#         if value in context:
+#             matching_num+=1
 def get_slot_information(ontology):
     ontology_domains = dict([(k, v) for k, v in ontology.items() if k.split("-")[0] in EXPERIMENT_DOMAINS])
     SLOTS = [k.replace(" ","").lower() if ("book" not in k) else k.lower() for k in ontology_domains.keys()]
@@ -1007,9 +1108,14 @@ def prepare_data(args, tokenizer):
        path_train = 'data_2.4/data/mwz2.4/train_dials.json'
        path_dev = 'data_2.4/data/mwz2.4/dev_dials.json'
        path_test = 'data_2.4/data/mwz2.4/test_dials.json'
-       dlc_train='train_dlc_2.4.json'
-       dlc_dev='dev_dlc_2.4.json'
-       dlc_test='test_dlc_2.4.json'
+       if args['tagging']:
+             dlc_train = 'train_dlc_2.4_tagging_label.json'
+             dlc_dev = 'dev_dlc_2.4_tagging_label.json'
+             dlc_test = 'test_dlc_2.4_tagging_label.json'
+       else:
+           dlc_train='train_dlc_2.4.json'
+           dlc_dev='dev_dlc_2.4.json'
+           dlc_test='test_dlc_2.4.json'
        ontology = json.load(open("data_2.4/data/mwz2.4/ontology.json", 'r'))
     #    print('ontology',ontology)
     else:
@@ -1045,6 +1151,9 @@ def prepare_data(args, tokenizer):
         data_process(args, path_test, ALL_SLOTS, tokenizer, description,slot_info,ontology, "test")
         if not args['data_loader']:
             os._exit()
+    if args['tagging']:
+        data_process(args, path_test, ALL_SLOTS, tokenizer, description, slot_info, ontology, "test",tagging=True)
+        os._exit()
     if args['data_loader']:
         data_train=read_data(args, dlc_train, "train")
         data_dev=read_data(args, dlc_dev, "dev")

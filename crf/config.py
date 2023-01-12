@@ -40,7 +40,10 @@ def get_args():
     parser.add_argument("--test", action='store_true')
     parser.add_argument("--continue_train", action='store_true')
     parser.add_argument("--crf", action='store_true')
+    parser.add_argument("--tagging", action='store_true')
     parser.add_argument("--contrastive_size", type=int, default=16, help="Batch size for contrastive_size")
+    parser.add_argument("--make_tagging_label", action='store_true')
+
     # star
     parser.add_argument("--data_dir", default='data/mwz2.1', type=str)
     parser.add_argument("--pretrained_model", default='bert-base-uncased', type=str)
