@@ -10,7 +10,6 @@ import json
 import time
 import logging
 from tqdm import tqdm, trange
-from copy import deepcopy
 
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler
 from utils.data_utils import Processor, MultiWozDataset
@@ -40,8 +39,8 @@ def main(args):
         os.makedirs(args.save_dir)
 
     # logger
-    logger_file_name = args.save_dir.split('/')[1]
-    fileHandler = logging.FileHandler(os.path.join(args.save_dir, "%s.txt" % (logger_file_name)))
+    #logger_file_name = args.save_dir.split('/')[1]
+    fileHandler = logging.FileHandler(os.path.join(args.save_dir, "attention_result.txt"))
     logger.addHandler(fileHandler)
     logger.info(args)
 
@@ -76,10 +75,8 @@ def main(args):
     logger.info("***Loading Data***")
     train_data_raw = processor.get_train_instances(args.data_dir, tokenizer)
     print("# train examples %d" % len(train_data_raw))
-    logger.info("***")
     dev_data_raw = processor.get_dev_instances(args.data_dir, tokenizer)
     print("# dev examples %d" % len(dev_data_raw))
-    logger.info("***")
     test_data_raw = processor.get_test_instances(args.data_dir, tokenizer)
     print("# test examples %d" % len(test_data_raw))
     logger.info("Data loaded!")
@@ -218,7 +215,7 @@ def main(args):
 
             if epoch > args.n_epochs / 2 and step > 0 and step % args.eval_step == 0:
                 eval_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
-                                            epoch * 10 + step / args.eval_step, args, value_lookup, slot_value_pos, is_dev=False)
+                                            epoch * 10 + step / args.eval_step, args, value_lookup, slot_value_pos, is_dev=True)
 
                 logger.info(
                     "*** Step=%d, Tes Loss=%.6f, Tes Acc=%.6f, Tes Turn Acc=%.6f, Best Loss=%.6f, Best Acc=%.6f ***" % \
@@ -248,7 +245,7 @@ def main(args):
 
         if (epoch + 1) % args.eval_epoch == 0:
             eval_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list, epoch + 1,
-                                        args, value_lookup, slot_value_pos, is_dev=False)
+                                        args, value_lookup, slot_value_pos, is_dev=True)
 
             logger.info(
                 "*** Epoch=%d, Last Update=%d, Tes Loss=%.6f, Tes Acc=%.6f, Tes Turn Acc=%.6f, Best Loss=%.6f, Best Acc=%.6f ***" % (
@@ -268,7 +265,7 @@ def main(args):
     model.to(device)
 
     test_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
-                                best_epoch, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=False)
+                                best_epoch, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=True)
     logger.info("Results based on best loss: ")
     logger.info(test_res)
     # ----------------------------------------------------------------------
@@ -280,7 +277,7 @@ def main(args):
     model.to(device)
 
     test_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
-                                best_epoch + 1, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=False)
+                                best_epoch + 1, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=True)
     logger.info("Results based on best acc: ")
     logger.info(test_res)
 
@@ -291,7 +288,7 @@ if __name__ == "__main__":
     # Required parameters
     parser.add_argument("--data_dir", default='data/mwz2.1', type=str)
     parser.add_argument("--pretrained_model", default='bert-base-uncased', type=str)
-    parser.add_argument("--save_dir", default='out-bert/exp', type=str)
+    parser.add_argument("--save_dir", default='out-bert/exp', type=str)  #更改save_dir储存不同model
     parser.add_argument("--attn_type", default='softmax', type=str,
                         help="softmax or tanh")
 
@@ -320,7 +317,4 @@ if __name__ == "__main__":
     parser.add_argument("--num_self_attention_layer", default=6, type=int)
 
     args = parser.parse_args()
-
-    print('pytorch version: ', torch.__version__)
-    #     print(args)
     main(args)

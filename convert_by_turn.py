@@ -46,7 +46,12 @@ for slot in slot_meta:
     fp_train.write(str(slot) + '\t')
     fp_dev.write(str(slot) + '\t')
     fp_test.write(str(slot) + '\t')
-    
+
+#new
+fp_train.write('history_slot_type\tcandidate_dict\t')
+fp_dev.write('history_slot_type\tcandidate_dict\t')
+fp_test.write('history_slot_type\tcandidate_dict\t')
+
 fp_train.write('\n')
 fp_dev.write('\n')
 fp_test.write('\n')
@@ -93,6 +98,10 @@ for idx, file_id in enumerate(data_files):
                 ontology_modified[slot].append(turn_dialog_state[slot])
             
             prev_belief = turn_dialog_state
+
+            # new
+            fp_out.write('\t' + json.dumps(dial_dict["history_slot_type"]))
+            fp_out.write('\t' + json.dumps(dial_dict["candidate_dict"]))
             
             fp_out.write('\n')
             fp_out.flush()

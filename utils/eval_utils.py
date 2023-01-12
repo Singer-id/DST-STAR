@@ -6,8 +6,6 @@ import os
 from tqdm import tqdm
 from copy import deepcopy
 
-from utils.label_lookup import get_label_ids, combine_slot_values
-
 
 def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch,
                      args, value_lookup, slot_value_pos,
@@ -163,9 +161,8 @@ def model_evaluation(model, test_data, tokenizer, slot_meta, label_list, epoch,
     print("Latency Per Prediction : %f ms" % latency)
     print("-----------------------------\n")
 
-    if not os.path.exists("pred"):
-        os.makedirs("pred")
-    json.dump(results, open('pred/preds_%d.json' % epoch, 'w'), indent=4)
+    output_path = os.path.join(args.save_dir, 'preds_%d.json' % epoch)
+    json.dump(results, open(output_path, 'w'), indent=4)
 
     scores = {'epoch': epoch, 'loss': loss, 'joint_acc': joint_acc_score, 'joint_turn_acc': joint_turn_acc_score,
               'slot_acc': slot_acc_score, 'ave_slot_acc': np.mean(slot_acc_score),

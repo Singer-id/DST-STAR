@@ -36,7 +36,6 @@ class Processor(object):
         self.slot_idx = [*range(0, self.num_slots)] #*是解包的意思
         self.label_list = [self.ontology[slot] for slot in self.slot_meta]
         self.label_map = [{label: i for i, label in enumerate(labels)} for labels in self.label_list]
-        #print(self.label_map)
         self.config = config
         self.domains = sorted(list(set([slot.split("-")[0] for slot in self.slot_meta])))
         self.num_domains = len(self.domains)
@@ -90,7 +89,7 @@ class Processor(object):
         history_uttr = []
 
         #lines = lines[9074:9094]
-        for (i, line) in enumerate(lines):
+        for (i, line) in enumerate(lines[0:10]):
             dialogue_idx = line[0]
             turn_idx = int(line[1])
             is_last_turn = (line[2] == "True")
@@ -103,6 +102,10 @@ class Processor(object):
             for idx in self.slot_idx:
                 turn_dialogue_state[self.slot_meta[idx]] = line[5+idx]
                 turn_dialogue_state_ids.append(self.label_map[idx][line[5+idx]]) #固定候选值集合获得的label_id
+
+            #从文件里读候选值集合
+            # history_type_turn_id = json.loads(line[35])
+            # candidate_dict = json.loads(line[36])
 
             if turn_idx == 0: # a new dialogue
                 last_dialogue_state = {}

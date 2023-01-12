@@ -308,8 +308,13 @@ def loadData(args):
     data_url = os.path.join(args.main_dir, "data.json")
     if args.mwz_ver == '2.1':
         dataset_url = "https://www.repository.cam.ac.uk/bitstream/handle/1810/294507/MULTIWOZ2.1.zip?sequence=1&isAllowed=y"
-    else:
+        dir_name = 'MULTIWOZ2.1'
+    if args.mwz_ver == '2.2':
         dataset_url = "https://www.repository.cam.ac.uk/bitstream/handle/1810/280608/MULTIWOZ2.zip?sequence=3&isAllowed=y"
+        dir_name = 'MULTIWOZ2 2'
+    if args.mwz_ver == '2.4':
+        dataset_url = "https://raw.githubusercontent.com/smartyfh/MultiWOZ2.4/main/data/MULTIWOZ2.4.zip"
+        dir_name = 'MULTIWOZ2.4'
     if not os.path.exists(args.main_dir):
         os.makedirs(args.main_dir)
 
@@ -319,7 +324,7 @@ def loadData(args):
         zip_ref = ZipFile(BytesIO(resp.read()))
         zip_ref.extractall(args.main_dir)
         zip_ref.close()
-        dir_name = 'MULTIWOZ2.1' if args.mwz_ver == '2.1' else 'MULTIWOZ2 2'
+
         shutil.copy(os.path.join(args.main_dir, dir_name, 'data.json'), args.main_dir)
         shutil.copy(os.path.join(args.main_dir, dir_name, 'ontology.json'), args.main_dir)
         shutil.copy(os.path.join(args.main_dir, dir_name, 'valListFile.json'), args.main_dir)
@@ -517,8 +522,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--main_dir", type=str, default='data/mwz21')
-    parser.add_argument("--mwz_ver", type=str, default='2.1')
-    parser.add_argument("--target_path", type=str, default='data/mwz2.1')
+    parser.add_argument("--main_dir", type=str, default='data/mwz21') #data/mwz24
+    parser.add_argument("--mwz_ver", type=str, default='2.1') #2.4
+    parser.add_argument("--target_path", type=str, default='data/mwz2.1') #data/mwz2.4
     args = parser.parse_args()
     main(args)

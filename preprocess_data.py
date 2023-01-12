@@ -1,11 +1,12 @@
 import json
 import os
 import re
+import argparse
 
 from utils.fix_label import fix_general_label_error
 
 
-data_dir = "data/mwz2.1"
+#data_dir = "data/mwz2.1" #"data/mwz2.4"
 
 data_files = ["train_dials.json", "dev_dials.json", "test_dials.json"]
 
@@ -69,18 +70,20 @@ def normalize_label(slot, value_label):
     if slot == "hotel-name":
         value_label = re.sub("b & b", "bed and breakfast", value_label)
 
+    '''
     # Map to boolean slots
     if slot == 'hotel-parking' or slot == 'hotel-internet':
         if value_label == 'yes' or value_label == 'free':
             return "true"
         if value_label == "no":
             return "false"
+    
     if slot == 'hotel-type':
         if value_label == "hotel":
             return "true"
         if value_label == "guest house":
             return "false"
-
+    '''
     return value_label
 #--------------------------------
 
@@ -95,66 +98,73 @@ def make_slot_meta(ontology):
         change[meta[-1]] = ontology[k]
     return sorted(meta), change
 
+def main(args):
+    ### Read ontology file
+    fp_ont = open(os.path.join(args.data_dir, "ontology.json"), "r")
+    data_ont = json.load(fp_ont)
+    fp_ont.close()
 
-### Read ontology file
-fp_ont = open(os.path.join(data_dir, "ontology.json"), "r")
-data_ont = json.load(fp_ont)
-fp_ont.close()
+    slot_meta, _ = make_slot_meta(data_ont)
+    ontology_modified = {}
+    for slot in slot_meta:
+        ontology_modified[slot] = []
 
-slot_meta, _ = make_slot_meta(data_ont)
-ontology_modified = {}
-for slot in slot_meta:
-    ontology_modified[slot] = []
 
-    
-### normalize text and fix label errors
-for idx, file_id in enumerate(data_files):   
-    fp_data = open(os.path.join(data_dir, file_id), "r")
-    dials = json.load(fp_data)
-    
-    dials_v2 = []
-    for dial_dict in dials:
-        dial_domains = dial_dict["domains"]
-        prev_turn_state = {}
-        for slot in slot_meta:
-            prev_turn_state[slot] = "none"
-            
-        for ti, turn in enumerate(dial_dict["dialogue"]):             
-            dial_dict["dialogue"][ti]["system_transcript"] = normalize_text(turn["system_transcript"])
-            dial_dict["dialogue"][ti]["transcript"] = normalize_text(turn["transcript"])
-            
-            # state
-            turn_dialog_state = fix_general_label_error(turn["belief_state"], False, slot_meta)
+    ### normalize text and fix label errors
+    for idx, file_id in enumerate(data_files):
+        fp_data = open(os.path.join(args.data_dir, file_id), "r")
+        dials = json.load(fp_data)
+
+        dials_v2 = []
+        for dial_dict in dials:
+            dial_domains = dial_dict["domains"]
+            prev_turn_state = {}
             for slot in slot_meta:
-                if slot not in turn_dialog_state or slot.split('-')[0] not in dial_domains:
-                    turn_dialog_state[slot] = "none"
-                else:
-                    turn_dialog_state[slot] = normalize_label(slot, turn_dialog_state[slot])
+                prev_turn_state[slot] = "none"
 
-                if turn_dialog_state[slot]=="dontcare":
-                    turn_dialog_state[slot] = "do not care"
+            for ti, turn in enumerate(dial_dict["dialogue"]):
+                dial_dict["dialogue"][ti]["system_transcript"] = normalize_text(turn["system_transcript"])
+                dial_dict["dialogue"][ti]["transcript"] = normalize_text(turn["transcript"])
 
-                ontology_modified[slot].append(turn_dialog_state[slot])
- 
-            dial_dict["dialogue"][ti]["belief_state"] = []
+                # state
+                turn_dialog_state = fix_general_label_error(turn["belief_state"], False, slot_meta)
+                for slot in slot_meta:
+                    if slot not in turn_dialog_state or slot.split('-')[0] not in dial_domains:
+                        turn_dialog_state[slot] = "none"
+                    else:
+                        turn_dialog_state[slot] = normalize_label(slot, turn_dialog_state[slot])
 
-            # turn label
-            turn_label = []
-            for slot in slot_meta:
-                if turn_dialog_state[slot] != prev_turn_state[slot]:
-                    turn_label.append([slot, turn_dialog_state[slot]])
-            dial_dict["dialogue"][ti]["turn_label"] = turn_label
-                        
-            prev_turn_state = turn_dialog_state
-            
-        dials_v2.append(dial_dict)
-        
-    with open(os.path.join(data_dir, file_id.split(".")[0]+"_v2.json"), 'w') as outfile:
-        json.dump(dials_v2, outfile, indent=4)
-                
-# ontology extracted from dataset
-for slot in slot_meta:
-    ontology_modified[slot] = sorted(list(set(ontology_modified[slot])))
-    
-with open(os.path.join(data_dir, 'ontology-modified_v2.json'), 'w') as outfile:
-     json.dump(ontology_modified, outfile, indent=4)
+                    if turn_dialog_state[slot]=="dontcare":
+                        turn_dialog_state[slot] = "do not care"
+
+                    ontology_modified[slot].append(turn_dialog_state[slot])
+
+                dial_dict["dialogue"][ti]["belief_state"] = []
+
+                # turn label
+                turn_label = []
+                for slot in slot_meta:
+                    if turn_dialog_state[slot] != prev_turn_state[slot]:
+                        turn_label.append([slot, turn_dialog_state[slot]])
+                dial_dict["dialogue"][ti]["turn_label"] = turn_label
+
+                prev_turn_state = turn_dialog_state
+
+            dials_v2.append(dial_dict)
+
+        with open(os.path.join(args.data_dir, file_id.split(".")[0]+"_v2.json"), 'w') as outfile:
+            json.dump(dials_v2, outfile, indent=4)
+
+    # ontology extracted from dataset
+    for slot in slot_meta:
+        ontology_modified[slot] = sorted(list(set(ontology_modified[slot])))
+
+    with open(os.path.join(args.data_dir, 'ontology-modified_v2.json'), 'w') as outfile:
+         json.dump(ontology_modified, outfile, indent=4)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_dir", type=str, default='data/mwz2.1') #data/mwz2.4
+    args = parser.parse_args()
+    main(args)
