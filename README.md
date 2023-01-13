@@ -1,58 +1,36 @@
-# DST-STAR
-
-This is the Pytorch implementation of our work: **Slot Self-Attentive Dialogue State Tracking. Fanghua Ye, Jarana Manotumruksa, Qiang Zhang, Shenghui Li, Emine Yilmaz. WWW 2021.** [[paper](https://arxiv.org/abs/2101.09374)]
-
-## Abstract
-An indispensable component in task-oriented dialogue systems is the dialogue state tracker, which keeps track of users' intentions in the course of conversation. The typical approach towards this goal is to fill in multiple pre-defined slots that are essential to complete the task. Although various dialogue state tracking methods have been proposed in recent years, most of them predict the value of each slot separately and fail to consider the correlations among slots. In this paper, we propose a slot self-attention mechanism that can learn the slot correlations automatically. Specifically, a slot-token attention is first utilized to obtain slot-specific features from the dialogue context. Then a stacked slot self-attention is applied on these features to learn the correlations among slots. We conduct comprehensive experiments on two multi-domain task-oriented dialogue datasets, including MultiWOZ 2.0 and MultiWOZ 2.1. The experimental results demonstrate that our approach achieves state-of-the-art performance on both datasets, verifying the necessity and effectiveness of taking slot correlations into consideration.
-
-## Model 
-
-<p align="center">
-  <img src="models/STAR_framework.png" width="70%" />
-</p>
-
-<p align="center">The model architecture of STAR</p>
-
-## Requirements
-
-+ Pytorch >= 1.6.0
-+ Transformers >= 3.1.0 
-
-
 ## Usage
+
+### Environment
++ Pytorch 1.9.0
++ Transformers 4.24.0
+
 ### Data Preprocessing
-
-```console
-❱❱❱ python3 create_data.py
-❱❱❱ python3 preprocess_data.py
-❱❱❱ python3 convert_by_turn.py
+#### use 2.1 dataset
+```
+mkdir data
+python create_data.py 
+python preprocess_data.py
+python convert_by_turn.py
+```
+#### use 2.4 dataset
+```
+python create_data.py --main_dir data/mwz24 --mwz_ver 2.4 --target_path data/mwz2.4
+python preprocess_data.py --data_dir data/mwz2.4
+python convert_by_turn.py --data_dir data/mwz2.4
 ```
 
-### Training
-
-```console
-❱❱❱ python3 train_STAR.py
+### Train and Evaluate
+#### use 2.1 datasets
 ```
-
-### Evaluation
-
-```console
-❱❱❱ python3 evaluation.py
+#train and test with power-law-attention
+python train_STAR.py --save_dir out-bert/model_name 
+#test with candidate strategy
+python evaluation.py --save_dir out-bert/model_name 
 ```
-
-If you don't want to re-train the model from scratch, you can download the saved model_dict from [here](https://drive.google.com/file/d/1Bz86HK4ebLqWlg4bd6voGv5TlT0x2qT6/view?usp=sharing). 
-
-## Citation
-
-```bibtex
-@inproceedings{ye2021star,
-  title={Slot Self-Attentive Dialogue State Tracking},
-  author={Ye Fanghua, Manotumruksa Jarana, Zhang Qiang, Li Shenghui, Yilmaz Emine},
-  booktitle={The Web Conference (WWW)},
-  year={2021}
-  }
+#### use 2.4 dataset
 ```
-
-## Contact
-
-If there are any questions, feel free to contact me at smartyfh@outlook.com.
+#train and test with power-law-attention
+python train_STAR.py --save_dir out-bert/model_name --data_dir data/mwz2.4
+#test with candidate strategy
+python evaluation.py --save_dir out-bert/model_name --data_dir data/mwz2.4
+```

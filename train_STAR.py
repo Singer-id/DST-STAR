@@ -215,7 +215,7 @@ def main(args):
 
             if epoch > args.n_epochs / 2 and step > 0 and step % args.eval_step == 0:
                 eval_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
-                                            epoch * 10 + step / args.eval_step, args, value_lookup, slot_value_pos, is_dev=True)
+                                            epoch * 10 + step / args.eval_step, args, value_lookup, slot_value_pos, is_dev=False)
 
                 logger.info(
                     "*** Step=%d, Tes Loss=%.6f, Tes Acc=%.6f, Tes Turn Acc=%.6f, Best Loss=%.6f, Best Acc=%.6f ***" % \
@@ -245,7 +245,7 @@ def main(args):
 
         if (epoch + 1) % args.eval_epoch == 0:
             eval_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list, epoch + 1,
-                                        args, value_lookup, slot_value_pos, is_dev=True)
+                                        args, value_lookup, slot_value_pos, is_dev=False)
 
             logger.info(
                 "*** Epoch=%d, Last Update=%d, Tes Loss=%.6f, Tes Acc=%.6f, Tes Turn Acc=%.6f, Best Loss=%.6f, Best Acc=%.6f ***" % (
@@ -265,7 +265,7 @@ def main(args):
     model.to(device)
 
     test_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
-                                best_epoch, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=True)
+                                best_epoch, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=False)
     logger.info("Results based on best loss: ")
     logger.info(test_res)
     # ----------------------------------------------------------------------
@@ -277,7 +277,7 @@ def main(args):
     model.to(device)
 
     test_res = model_evaluation(model, test_data_raw, tokenizer, slot_meta, label_list,
-                                best_epoch + 1, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=True)
+                                best_epoch + 1, args, value_lookup, slot_value_pos, is_gt_p_state=False, is_dev=False)
     logger.info("Results based on best acc: ")
     logger.info(test_res)
 

@@ -73,7 +73,7 @@ class Processor(object):
         return self._create_instances(self._read_tsv(os.path.join(data_dir, "dev.tsv")), tokenizer)
 
     def get_test_instances(self, data_dir, tokenizer):
-        return self._create_instances(self._read_tsv(os.path.join(data_dir, "test.tsv")), tokenizer)
+        return self._create_instances(self._read_tsv(os.path.join(data_dir, "test.tsv")), tokenizer, eval_type="test")
 
     def get_candidate_label_map(self, candidate_dict):
         label_list = []
@@ -82,14 +82,14 @@ class Processor(object):
         label_map = [{label: i for i, label in enumerate(labels)} for labels in label_list]
         return label_map, label_list
 
-    def _create_instances(self, lines, tokenizer):
+    def _create_instances(self, lines, tokenizer, eval_type="train"):
         instances = []
         last_uttr = None
         last_dialogue_state = {}
         history_uttr = []
 
         #lines = lines[9074:9094]
-        for (i, line) in enumerate(lines[0:10]):
+        for (i, line) in enumerate(lines):
             dialogue_idx = line[0]
             turn_idx = int(line[1])
             is_last_turn = (line[2] == "True")
@@ -103,10 +103,6 @@ class Processor(object):
                 turn_dialogue_state[self.slot_meta[idx]] = line[5+idx]
                 turn_dialogue_state_ids.append(self.label_map[idx][line[5+idx]]) #固定候选值集合获得的label_id
 
-            #从文件里读候选值集合
-            # history_type_turn_id = json.loads(line[35])
-            # candidate_dict = json.loads(line[36])
-
             if turn_idx == 0: # a new dialogue
                 last_dialogue_state = {}
                 history_uttr = []
@@ -115,14 +111,13 @@ class Processor(object):
                 candidate_dict = {
                     "adj":["none","do not care"],
                     "num":["none","do not care"],
-                    "type":["none","do not care","true","false"],
+                    "type":["none","do not care"],
                     "location":["none","do not care"],
                     "time":["none","do not care"],
-                    "name":["none","do not care"],
                     "day":["none","do not care"],
                     "area": ["none", "do not care"],
                     "food": ["none", "do not care"],
-                    "bool":["do not care","false","none","true"]
+                    "bool":["none", "do not care","yes","no","free"]
                 } #伪候选值集合
                 last_uttr = ""
                 for slot in self.slot_meta:
@@ -134,27 +129,54 @@ class Processor(object):
                 if last_dialogue_state[slot] != value:
                     turn_only_label.append(slot + "-" + value)
                     #打标签
-                    if value not in ["none", "true", "false", "do not care"] :
+                    if value not in ["none", "yes", "no", "do not care"] :
                         value_type = self.slot_type[s]
                         if value_type not in history_type_turn_id: #添加key，初始化value
                             history_type_turn_id[value_type] = []
 
                         if turn_idx not in history_type_turn_id[value_type]: #构建伪type_turn_id_list
                             history_type_turn_id[value_type].append(turn_idx)
+                    if eval_type != "test":
+                        #伪候选值集合
+                        if value not in candidate_dict[value_type]:
+                            candidate_dict[value_type].append(value)
 
-                    #伪候选值集合
-                    if value not in candidate_dict[value_type]:
-                        candidate_dict[value_type].append(value)
+            # 从文件里读history_type_turn_id和candidate_dict
+            if eval_type == "test":
+                history_type_turn_id = json.loads(line[35])
+                part_candidate_dict = json.loads(line[36])
 
+                for key in candidate_dict:
+                    if key in part_candidate_dict:
+                        candidate_dict[key].extend(part_candidate_dict[key]) #补全候选值集合
             #构造对应于本轮候选值集合的label_id
             candidate_label_map, candidate_label_list = self.get_candidate_label_map(candidate_dict)
-            for idx in self.slot_idx:
-                candidate_label_ids.append(candidate_label_map[idx][line[5+idx]]) #新候选值集合对于的label_id
 
-            #print("________")
-            #print(self.slot_type)
-            #print(candidate_label_list)
-            #print(candidate_label_ids)
+            # print("________")
+            # print("dialogue:"+str(dialogue_idx))
+            # print("turn:"+str(turn_idx))
+            # print(candidate_dict)
+            # print(self.slot_type)
+            # print(line[5+idx])
+            # print(candidate_label_map)
+            # print(candidate_label_list)
+
+            for idx in self.slot_idx:
+                # print("^^^")
+                # print("slot:"+str(idx))
+                # print(line[5+idx])
+                v = line[5 + idx]
+                # TODO 打印查不到的情况 value和次数
+                if v in candidate_label_map[idx]:
+                    candidate_label_ids.append(candidate_label_map[idx][v]) #新候选值集合对于的label_id
+                else:
+                    file = open('label_bug.txt', mode='a+')
+                    file.write(
+                        "dialogue_id:" + str(instance.dialogue_id) + " turn_id:" + str(instance.turn_id) +
+                        " slot:" + str(idx) + " true_label:" + str(line[5+idx]) + '\n')
+                    file.close()
+                    candidate_label_ids.append(-1)
+            # print(candidate_label_ids)
 
             history_uttr.append(last_uttr)
 
@@ -229,10 +251,12 @@ class Processor(object):
             segment_id_state = [0] * len(state)
             input_mask_state = [1] * len(state)
 
-            #候选值集合的mask
-            new_label_list, slot_value_pos = combine_slot_values(self.slot_meta, candidate_label_list)
-            _label_ids, _label_lens = get_label_ids(new_label_list, tokenizer)
-
+            if eval_type == "test":
+                # 候选值集合的mask
+                new_label_list, slot_value_pos = combine_slot_values(self.slot_meta, candidate_label_list)
+                _label_ids, _label_lens = get_label_ids(new_label_list, tokenizer)
+            else:
+                slot_value_pos, _label_ids, _label_lens = [],[],[]
 
             # ID, turn_id, turn_utter, dialogue_history, label_ids,
             # candidate_label_ids, candidate_label_list,

@@ -27,7 +27,7 @@
         "description_human": "whether the hotel has parking",
         "values": [
             "dontcare",
-            "free", //TODO
+            "free",
             "no",
             "yes"
         ],
@@ -256,7 +256,7 @@
         "naive": "name of the attraction",
         "question": "What is the name of the attraction that the user in interested in?",
         "slottype": "name of the attraction",
-        "value_type":"name"
+        "value_type":"location"
     },
     "restaurant-name": {
         "description_human": "name of the restaurant",
@@ -264,7 +264,7 @@
         "naive": "name of the restaurant",
         "question": "What is the name of the restaurant that the user in interested in?",
         "slottype": "name of the restaurant",
-        "value_type":"name"
+        "value_type":"location"
     },
     "attraction-type": {
         "description_human": "type of the attraction",
@@ -296,7 +296,7 @@
         "naive": "name of the hotel",
         "question": "What is the name of the hotel that the user in interested in?",
         "slottype": "name of the hotel",
-        "value_type":"name"
+        "value_type":"location"
     },
     "taxi-leaveat": {
         "description_human": "leaving time of taxi",
