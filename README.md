@@ -34,3 +34,4 @@ python train_STAR.py --save_dir out-bert/model_name --data_dir data/mwz2.4
 #test with candidate strategy
 python evaluation.py --save_dir out-bert/model_name --data_dir data/mwz2.4
 ```
+

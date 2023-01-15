@@ -79,7 +79,6 @@ class DSTDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-
 def turn_slot_values_find(pre_turn_slot_values,turn_belief_list):
     result={}
     for key in turn_belief_list.keys():
@@ -92,11 +91,13 @@ def turn_slot_values_find(pre_turn_slot_values,turn_belief_list):
                 result[key]=turn_belief_list[key]
 
     return result
+
 def state_process_24(input_list):
     result={}
     for slot in input_list:
         result[slot['slots'][0][0]]=slot['slots'][0][1]
     return result
+
 def state_filter(state):
     result=[]
     for slot in state:
@@ -147,9 +148,6 @@ def read_data(args, path_name,dataset=None):
                 if domain not in domain_counter.keys():
                     domain_counter[domain] = 0
                 domain_counter[domain] += 1
-
-
-
 
             if args['use_2.4']:
                 turns=enumerate(dial_dict["dialogue"])
@@ -709,66 +707,6 @@ def slot_operation(slot,pre_turn_state,turn_state,state):
              else:
                     return 'dontcare'
 
-# def co_reference_find(turn_slot_values,turn_dialogue,dial_dict):
-#     match_num=0
-#     result=[]
-#     for slot in turn_slot_values:
-#         slot_domain=slot[:slot.find('-')]
-#         if slot_domain not in EXPERIMENT_DOMAINS:
-#             continue
-#         if slot=='hotel-parking' or slot=='hotel-internet':
-#             continue
-#         if turn_slot_values[slot] in ['none','dontcare']:
-#              continue
-#         # print(turn_slot_values[slot],turn_dialogue.split())
-#         # if dial_dict['dial_id']=='PMUL1690.json':
-#         #    print('PMUL1690.json')
-#         #    if turn_slot_values[slot]=='monday':
-#
-#         #      print('input_list',value_matching(turn_slot_values[slot],turn_dialogue.split(),dial_dict),turn_dialogue.split())
-#         if not value_matching(turn_slot_values[slot],turn_dialogue.split(),dial_dict):
-#            match_num+=1
-#            result.append(slot)
-#
-#     return  result
-
-
-
-# def value_matching(value,sentence_list,dial_dict):
-#     value=value.split()
-#     save_list=[]
-#     input_list=enumerate(sentence_list)
-#     work_step=0
-#     # if dial_dict['dial_id']=='PMUL1690.json':
-#     #     if value==['monday']:
-#     #        print('input_list',sentence_list)
-#     for idx, token in input_list:
-#         if token==value[0]:
-#             if len(value)==1:
-#                 return True
-#             else:
-#                 for value_idx in range(len(value)-1):
-#                     work_step+=1
-#                     try:
-#                         if sentence_list[idx+value_idx+1]!=value[value_idx+1]:
-#                             break
-#                     except:
-#                          return False
-#                     return True
-#         for skip in range(work_step):
-#             try:
-#                 next(input_list)
-#             except:
-#                     break
-#         work_step=0
-#     return False
-# def value_map(value_list,context,context_idx):
-#     matching_num=0
-#     context=context[context_idx:len(value_list)+3]
-#     for token in context
-#     for value in value_list:
-#         if value in context:
-#             matching_num+=1
 def get_slot_information(ontology):
     ontology_domains = dict([(k, v) for k, v in ontology.items() if k.split("-")[0] in EXPERIMENT_DOMAINS])
     SLOTS = [k.replace(" ","").lower() if ("book" not in k) else k.lower() for k in ontology_domains.keys()]
@@ -805,15 +743,7 @@ def crf_collate_fn(data, tokenizer):
     for key in data[0]:
         batch_data[key] = [d[key] for d in data]
 
-    # print(batch_data['input_pre_turn_state'])
-    # for batch_idx in range(len(batch_data["transcript"])):
-    #     batch_data["transcript"][batch_idx] += " " + tokenizer.sep_token + " " + state_dict_to_str(
-    #         batch_data['input_pre_turn_state'][batch_idx])
-    # print(batch_data["transcript"])
-    # input_batch = tokenizer(batch_data["input"], pad_to_max_length=True,
-    #                         return_tensors="pt", verbose=False, add_special_tokens=True)
     max_length = max(len(each.split()) for each in batch_data["input"])
-    # print('max_length_data', max_length)
     input_batch=tokenizer.batch_encode_plus(batch_data["input"],
                                 add_special_tokens=True,
                                 padding='longest',
